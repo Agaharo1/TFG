@@ -9,7 +9,7 @@ El proyecto requiere el componente oficial de la cámara de Espressif. Para inst
 ```bash
 mkdir components
 cd components
-git clone [https://github.com/espressif/esp32-camera.git](https://github.com/espressif/esp32-camera.git)
+git clone https://github.com/espressif/esp32-camera.git
 cd ..
 ```
 ## 2.Crea tu wifi_settings.h
