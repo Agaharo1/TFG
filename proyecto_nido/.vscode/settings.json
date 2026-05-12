@@ -4,8 +4,8 @@
   "idf.openOcdConfigs": [
     "board/esp32-wrover-kit-3.3v.cfg"
   ],
-  "idf.portWin": "COM3",
-  "idf.currentSetup": "C:\\Users\\agaha\\esp32\\v5.4\\esp-idf",
+  "idf.portWin": "COM9",
+  "idf.currentSetup": "C:\\Users\\anton\\esp\\v5.4\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32"
   },
