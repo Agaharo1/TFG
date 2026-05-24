@@ -79,21 +79,22 @@
 ### Pasos
 
 ```bash
-# 1. Crea tu settings.h CONFIG_MESH_ROUTER_SSID y CONFIG_MESH_ROUTER_PASS
-# 1. Clonar / copiar el proyecto
+# 1. Crea tu settings.h 
+CONFIG_MESH_ROUTER_SSID y CONFIG_MESH_ROUTER_PASS
+# 2. Clonar / copiar el proyecto
 cd wifi_mesh_tfg
 
-# 2. Ajustar credenciales en sdkconfig.defaults
+# 3. Ajustar credenciales en sdkconfig.defaults
 #    Editar los campos marcados con <--
 nano sdkconfig.defaults
 
-# 3. Configurar (opcional, para ajustes adicionales)
+# 4. Configurar (opcional, para ajustes adicionales)
 idf.py menuconfig
 
-# 4. Compilar
+# 5. Compilar
 idf.py build
 
-# 5. Flashear los tres nodos (repetir para cada uno con su puerto)
+# 6. Flashear los tres nodos (repetir para cada uno con su puerto)
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
@@ -136,9 +137,7 @@ Abrir `http://<IP_UBUNTU>:3000` → usuario `admin` / contraseña `grafana_pass`
 
 **Configurar datasource InfluxDB:**
 - URL: `http://influxdb:8086`
-- Organization: `tfg`
-- Token: `tfg-super-secret-token`
-- Default bucket: `mesh_metrics`
+
 
 ---
 
@@ -183,7 +182,7 @@ Abrir `http://<IP_UBUNTU>:3000` → usuario `admin` / contraseña `grafana_pass`
 ```
 wifi_mesh_tfg/
 ├── CMakeLists.txt
-├── sdkconfig.defaults          ← Ajusta SSID, pass y broker aquí
+├── sdkconfig.defaults          ← Ajusta SSID, pass y broker aquí o crea tu archivo settings.h
 ├── main/
 │   ├── CMakeLists.txt
 │   ├── main.c                  ← Punto de entrada (app_main)
