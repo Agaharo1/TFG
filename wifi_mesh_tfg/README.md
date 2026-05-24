@@ -75,13 +75,11 @@
 
 ## 1. Configurar el firmware (ESP-IDF)
 
-### Prerrequisitos
-- ESP-IDF v5.1 o superior instalado y en `PATH`
-- 3 placas ESP32 (con antena WiFi, cualquier variante: ESP32-WROOM, ESP32-S3…)
 
 ### Pasos
 
 ```bash
+# 1. Crea tu settings.h CONFIG_MESH_ROUTER_SSID y CONFIG_MESH_ROUTER_PASS
 # 1. Clonar / copiar el proyecto
 cd wifi_mesh_tfg
 
@@ -105,7 +103,7 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 ---
 
-## 2. Poner en marcha el servidor Ubuntu
+## 2. Poner en marcha el servidor 
 
 ### Prerrequisitos
 ```bash
@@ -119,11 +117,11 @@ cd server/
 # Crear directorios necesarios
 mkdir -p mosquitto/{data,log} telegraf grafana/provisioning
 
-# Arrancar todo el stack
-docker compose up -d
+# Arrancar todo 
+docker-compose up -d
 
 # Verificar que los contenedores están healthy
-docker compose ps
+docker-compose ps
 ```
 
 ### Verificar que llegan mensajes MQTT
@@ -201,14 +199,4 @@ wifi_mesh_tfg/
         └── telegraf.conf       ← Bridge MQTT → InfluxDB
 ```
 
----
 
-## 6. Solución de problemas habituales
-
-| Problema | Posible causa | Solución |
-|----------|--------------|----------|
-| Nodo no se une a la malla | MESH_ID o password incorrectos | Verificar `sdkconfig.defaults` |
-| Root no obtiene IP | SSID/pass del router incorrectos | Verificar `CONFIG_MESH_ROUTER_*` |
-| MQTT no conecta | IP del broker incorrecta o firewall | `ping <broker>` desde el router; abrir puerto 1883 |
-| Grafana sin datos | Telegraf no parsea JSON | `docker logs tfg_telegraf` |
-| `esp_mesh_send` devuelve `ESP_ERR_MESH_NO_ROUTE_FOUND` | Nodo aún no enrutado | Esperar a `MESH_EVENT_PARENT_CONNECTED` |
