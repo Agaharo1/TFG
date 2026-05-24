@@ -172,12 +172,11 @@ void obtener_hora_ntp()
     tzset();
 }
 
-// --- 6. FUNCIÓN PRINCIPAL ---
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "==== INICIANDO SISTEMA DEL NIDO ====");
 
-    // Inicializar NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -186,10 +185,9 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // Conectar al Wi-Fi
+  
     wifi_init_sta();
 
-    // Obtener la hora actual
     obtener_hora_ntp();
 
     time_t now;
@@ -207,7 +205,6 @@ void app_main(void)
 
     if (hora_actual >= hora_inicio_dia && hora_actual < hora_inicio_noche)
     {
-        // ========== ES DE DÍA ==========
         ESP_LOGI(TAG, "Es de día. Preparando cámara para la foto...");
 
         esp_err_t err = esp_camera_init(&camera_config);
@@ -215,9 +212,9 @@ void app_main(void)
         {
 
             ESP_LOGI(TAG, "Dejando que el sensor ajuste la luz...");
-            vTaskDelay(pdMS_TO_TICKS(2000)); // Esperamos 2 segundos
+            vTaskDelay(pdMS_TO_TICKS(2000)); 
 
-            // Descartamos las 2 primeras fotos malas (buffer antiguo)
+            // Descartar las 2 primeras fotos malas (buffer antiguo)
             camera_fb_t *fb_malo = NULL;
             for (int i = 0; i < 2; i++)
             {
@@ -226,7 +223,6 @@ void app_main(void)
                     esp_camera_fb_return(fb_malo);
             }
 
-            // Ahora sí, tomamos la foto definitiva y estabilizada
             ESP_LOGI(TAG, "Tomando la foto definitiva...");
             camera_fb_t *fb = esp_camera_fb_get();
 
@@ -246,13 +242,12 @@ void app_main(void)
             ESP_LOGE(TAG, "Fallo al inicializar la cámara: 0x%x", err);
         }
 
-        // Dormir 30 minutos exactos (1800 segundos)
         tiempo_dormir_us = 1800ULL * 1000000ULL;
         ESP_LOGI(TAG, "Entrando en Deep Sleep durante 30 minutos...");
     }
     else
     {
-        // ========== ES DE NOCHE ==========
+   
         ESP_LOGI(TAG, "Es de noche. La cámara no se activará para ahorrar batería.");
 
         int horas_para_dormir = 0;
@@ -271,7 +266,6 @@ void app_main(void)
         ESP_LOGI(TAG, "Entrando en Deep Sleep hasta las %02d:00...", hora_inicio_dia);
     }
 
-    // Ejecutar el Deep Sleep (el sistema se apagará aquí y despertará limpio al acabar el tiempo)
     esp_sleep_enable_timer_wakeup(tiempo_dormir_us);
     esp_deep_sleep_start();
 }

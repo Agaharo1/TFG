@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "name": "ESP32",
+      "compilerPath": "C:\\Users\\agaha\\.espressif\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32-elf-gcc.exe",
+      "cStandard": "c17",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "gcc-x64",
+      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+      "includePath": [
+        "${workspaceFolder}/main",
+        "${workspaceFolder}/build/config",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/freertos/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/freertos/include/freertos",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/freertos/FreeRTOS-Kernel/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_common/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_hw_support/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_rom/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_system/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_log/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_wifi/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_mesh/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_event/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_netif/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/esp_driver_gpio/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/driver/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/hal/include",
+        "C:/Users/agaha/esp32/v5.4/esp-idf/components/hal/esp32/include"
+      ],
+      "defines": [
+        "ESP32",
+        "IDF_TARGET_ESP32"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}",
+          "C:/Users/agaha/esp32/v5.4/esp-idf/components"
+        ],
+        "limitSymbolsToIncludedHeaders": false
+      }
+    }
+  ],
+  "version": 4
+}

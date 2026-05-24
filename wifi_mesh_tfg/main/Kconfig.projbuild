@@ -1,0 +1,68 @@
+menu "TFG Mesh Configuration"
+
+    config MESH_SSID
+        string "SSID de la red mesh interna"
+        default "TFG_Mesh_Network"
+        help
+            Nombre de la red WiFi que usan los nodos para comunicarse entre sí.
+
+    config MESH_PASSWORD
+        string "Contraseña de la red mesh"
+        default "mesh_pass_2024"
+        help
+            Contraseña WPA2 de la red mesh interna. Mínimo 8 caracteres.
+
+    config MESH_ROUTER_SSID
+        string "SSID del router externo"
+        default "MiRouter_SSID"
+        help
+            SSID del router WiFi al que se conectará el nodo root para salir a Internet.
+
+    config MESH_ROUTER_PASS
+        string "Contraseña del router externo"
+        default "router_password"
+        help
+            Contraseña WPA2 del router externo.
+
+    config MESH_MAX_LAYER
+        int "Número máximo de capas en la malla"
+        default 4
+        range 1 25
+        help
+            Profundidad máxima del árbol mesh. Para 3 nodos con 2 saltos, 4 es suficiente.
+
+    config MESH_TX_INTERVAL_MS
+        int "Intervalo de envío de métricas (ms)"
+        default 5000
+        range 1000 60000
+        help
+            Cada cuántos milisegundos cada nodo envía su payload de métricas al root.
+
+    config MESH_PING_INTERVAL_MS
+        int "Intervalo de ping para medir latencia (ms)"
+        default 10000
+        range 2000 120000
+        help
+            Cada cuántos milisegundos el root envía pings a todos los nodos para
+            calcular el RTT (round-trip time).
+
+    config MQTT_BROKER_URI
+        string "URI del broker MQTT"
+        default "mqtt://192.168.1.100:1883"
+        help
+            URI completa del broker MQTT en el servidor Ubuntu.
+            Formato: mqtt://<IP>:<puerto>
+
+    config MQTT_USERNAME
+        string "Usuario MQTT (opcional)"
+        default ""
+        help
+            Dejar vacío si el broker no requiere autenticación.
+
+    config MQTT_PASSWORD
+        string "Contraseña MQTT (opcional)"
+        default ""
+        help
+            Dejar vacío si el broker no requiere autenticación.
+
+endmenu

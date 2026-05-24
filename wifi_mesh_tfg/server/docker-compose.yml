@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  docker-compose.yml — Stack MQTT + InfluxDB + Grafana para el Ubuntu server
+#  Uso: docker compose up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Broker MQTT ─────────────────────────────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: tfg_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"    # MQTT sin TLS (LAN interna)
+      - "9001:9001"    # WebSocket (opcional para dashboard web)
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+  # ── InfluxDB v2 ──────────────────────────────────────────────────────────────
+  influxdb:
+    image: influxdb:2.7
+    container_name: tfg_influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE:        setup
+      DOCKER_INFLUXDB_INIT_USERNAME:    admin
+      DOCKER_INFLUXDB_INIT_PASSWORD:    adminpassword      # <-- cambia esto
+      DOCKER_INFLUXDB_INIT_ORG:         tfg
+      DOCKER_INFLUXDB_INIT_BUCKET:      mesh_metrics
+      DOCKER_INFLUXDB_INIT_RETENTION:   30d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: tfg-super-secret-token   # <-- cambia esto
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+
+  # ── Telegraf (MQTT → InfluxDB) ────────────────────────────────────────────
+  telegraf:
+    image: telegraf:1.30
+    container_name: tfg_telegraf
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+      - influxdb
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: tfg_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: grafana_pass    # <-- cambia esto
+      GF_INSTALL_PLUGINS:         grafana-clock-panel,grafana-worldmap-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  influxdb_data:
+  grafana_data:
