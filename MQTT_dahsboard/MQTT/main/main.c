@@ -14,22 +14,20 @@
 // --- CONFIGURACIÓN ---
 #define WIFI_SSID      ""
 #define WIFI_PASS      ""
-#define MQTT_BROKER_IP "mqtt://192.168.1.44" // IP de tu Ubuntu Server
+#define MQTT_BROKER_IP "" 
 
 static const char *TAG = "ESP32_IOT";
 
-// --- 1. TAREA DE FREERTOS PARA GENERAR Y PUBLICAR DATOS ---
-// --- 1. TAREA DE FREERTOS ACTUALIZADA ---
 static void publisher_task(void *pvParameters) {
     esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t) pvParameters;
     char temp_str[10];
     char hum_str[10];
-    int contador_mensajes = 0; // Iniciamos el contador
+    int contador_mensajes = 0; 
 
     ESP_LOGI(TAG, "Iniciando ráfaga de 200 mensajes (1 por segundo)...");
 
     while (contador_mensajes < 200) {
-        // Generar números aleatorios
+       
         float temp = 20.0 + ((esp_random() % 101) / 10.0); 
         float hum = 40.0 + ((esp_random() % 201) / 10.0);
 
@@ -45,16 +43,13 @@ static void publisher_task(void *pvParameters) {
         ESP_LOGI(TAG, "[Mensaje %d/200] Enviado -> Temp: %s | Hum: %s", 
                  contador_mensajes, temp_str, hum_str);
 
-        // Esperar exactamente 1 segundo (1000 ms)
+    
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     ESP_LOGW(TAG, "Se han enviado 200 mensajes. Deteniendo publicaciones.");
     
-    // Opcional: Si quieres que el ESP32 se desconecte al terminar
-    // esp_mqtt_client_stop(client);
-
-    // Eliminamos la tarea para liberar memoria RAM
+ 
     vTaskDelete(NULL); 
 }
 
@@ -96,9 +91,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "¡Conectado! IP asignada: " IPSTR, IP2STR(&event->ip_info.ip));
-        
-        // --- ¡AQUÍ ESTÁ LA MAGIA! ---
-        // Solo cuando tenemos IP de red, arrancamos el cliente MQTT
         iniciar_mqtt();
     }
 }
