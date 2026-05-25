@@ -12,8 +12,8 @@
 #include "esp_random.h"
 
 // --- CONFIGURACIÓN ---
-#define WIFI_SSID      "MOVISTAR_B102"
-#define WIFI_PASS      "ASvGLDabDVdb2S9jVdzc"
+#define WIFI_SSID      ""
+#define WIFI_PASS      ""
 #define MQTT_BROKER_IP "mqtt://192.168.1.44" // IP de tu Ubuntu Server
 
 static const char *TAG = "ESP32_IOT";
