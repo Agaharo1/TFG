@@ -36,6 +36,7 @@ typedef struct __attribute__((packed)) {
     uint32_t latency_ms;       /* Última latencia RTT medida [ms]          */
     uint32_t free_heap;        /* Heap libre [bytes]                       */
     uint32_t uptime_s;         /* Tiempo activo [segundos]                 */
+    uint32_t ping_lost_count;
 } metrics_payload_t;
 
 /* ─── Payload de ping / pong ─────────────────────────────────────────────── */

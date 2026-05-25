@@ -163,58 +163,6 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     cJSON_Delete(root);
 }
 
-void mqtt_publish_latency(const uint8_t *mac, uint32_t latency_ms)
-{
-    if (!mqtt_is_connected()) return;
-
-    char topic[64];
-    snprintf(topic, sizeof(topic), MQTT_TOPIC_METRICS_FMT,
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-    char payload[64];
-    snprintf(payload, sizeof(payload), "{\"latency_ms\":%lu}", (unsigned long)latency_ms);
-    ESP_LOGI(TAG, "Publicando latencia de %02x:%02x:%02x:%02x:%02x:%02x — %lu ms",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-             (unsigned long)latency_ms);
-    esp_mqtt_client_publish(s_client, topic, payload, 0, 0, 0);
-}
 
 
-void mqtt_publish_topology(void)
-{
-    if (!mqtt_is_connected()) return;
 
-    /* Obtener tabla de routing */
-    mesh_addr_t *table = NULL;
-    int node_num = esp_mesh_get_routing_table_size();
-    if (node_num <= 0) return;
-
-    table = malloc(node_num * sizeof(mesh_addr_t));
-    if (!table) return;
-
-    int actual = 0;
-    esp_mesh_get_routing_table(table, node_num * sizeof(mesh_addr_t), &actual);
-
-    cJSON *root  = cJSON_CreateObject();
-    cJSON *nodes = cJSON_AddArrayToObject(root, "nodes");
-
-    for (int i = 0; i < actual; i++) {
-        char mac_str[18];
-        snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
-                 table[i].addr[0], table[i].addr[1], table[i].addr[2],
-                 table[i].addr[3], table[i].addr[4], table[i].addr[5]);
-        cJSON_AddItemToArray(nodes, cJSON_CreateString(mac_str));
-    }
-
-    cJSON_AddNumberToObject(root, "total_nodes", actual);
-    cJSON_AddNumberToObject(root, "max_layer",   esp_mesh_get_layer());
-
-    char *payload = cJSON_PrintUnformatted(root);
-    if (payload) {
-        esp_mqtt_client_publish(s_client, MQTT_TOPIC_TOPO, payload, 0, 0, 0);
-        free(payload);
-    }
-
-    cJSON_Delete(root);
-    free(table);
-}

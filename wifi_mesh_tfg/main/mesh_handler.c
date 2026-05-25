@@ -63,14 +63,12 @@ static bool       s_root_known  = false;
 static uint32_t   s_tx_seq      = 0;
 static uint32_t   s_ping_seq    = 0;
 
-uint32_t last_known_latency = 0; // Variable global para almacenar la última latencia conocida, accesible desde mqtt_handler.c
+static TaskHandle_t s_tx_task_handle = NULL; 
+static uint32_t     s_last_rtt = 0;         
+static bool         s_pong_received = false;  
 
 #define MAX_PENDING_PINGS 8
-static struct {
-    uint32_t seq;
-    uint32_t sent_ms;
-} s_pending_pings[MAX_PENDING_PINGS];
-static int s_pending_count = 0;
+
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
@@ -88,77 +86,7 @@ static void build_header(mesh_hdr_t *hdr, mesh_msg_type_t type)
     hdr->timestamp_ms = now_ms();
 }
 
-/* ─── Envío de métricas hacia el root ───────────────────────────────────── */
 
-static void send_metrics_to_root(void)
-{
-    if (!s_root_known) {
-        ESP_LOGD(TAG, "Root aún desconocido — esperando MESH_EVENT_ROOT_ADDRESS");
-        return;
-    }
-
-    mesh_packet_t pkt;
-    build_header(&pkt.hdr, MSG_METRICS);
-    metrics_collect(&pkt.payload.metrics);
-
-    mesh_data_t data = {
-        .data  = (uint8_t *)&pkt,
-        .size  = MESH_PACKET_SIZE,
-        .proto = MESH_PROTO_BIN,
-        .tos   = MESH_TOS_P2P,
-    };
-
-    /* Dirección P2P al root cuya MAC obtuvimos de MESH_EVENT_ROOT_ADDRESS */
-    esp_err_t ret = esp_mesh_send(&s_root_addr, &data, MESH_DATA_P2P, NULL, 0);
-    metrics_record_tx(ret == ESP_OK);
-
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "send_metrics error: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGD(TAG, "Métricas → root (seq=%lu)", (unsigned long)s_tx_seq);
-    }
-}
-
-/* ─── Ping desde el root a todos los nodos ───────────────────────────────── */
-
-static void ping_all_nodes(void)
-{
-    int node_num = esp_mesh_get_routing_table_size();
-    if (node_num <= 0) return;
-
-    /* Tabla en heap para no depender de tamaño estático */
-    mesh_addr_t *table = malloc((size_t)node_num * sizeof(mesh_addr_t));
-    if (!table) return;
-
-    int actual = 0;
-    esp_mesh_get_routing_table(table, node_num * (int)sizeof(mesh_addr_t), &actual);
-
-    for (int i = 0; i < actual; i++) {
-        if (memcmp(table[i].addr, s_my_mac, 6) == 0) continue;
-
-        mesh_packet_t pkt;
-        build_header(&pkt.hdr, MSG_PING);
-        pkt.payload.ping.ping_seq = ++s_ping_seq;
-        pkt.payload.ping.sent_ms  = now_ms();
-        pkt.payload.ping.recv_ms  = 0;
-
-        if (s_pending_count < MAX_PENDING_PINGS) {
-            s_pending_pings[s_pending_count].seq     = s_ping_seq;
-            s_pending_pings[s_pending_count].sent_ms = pkt.payload.ping.sent_ms;
-            s_pending_count++;
-        }
-
-        mesh_data_t data = {
-            .data  = (uint8_t *)&pkt,
-            .size  = MESH_PACKET_SIZE,
-            .proto = MESH_PROTO_BIN,
-            .tos   = MESH_TOS_P2P,
-        };
-        esp_mesh_send(&table[i], &data, MESH_DATA_P2P, NULL, 0);
-        ESP_LOGI(TAG, "PING → %02x:%02x:%02x:%02x:%02x:%02x", MAC2STR(table[i].addr));
-    }
-    free(table);
-}
 
 /* ─── Responder PONG ─────────────────────────────────────────────────────── */
 
@@ -183,20 +111,12 @@ static void reply_pong(const mesh_addr_t *requester, const ping_payload_t *ping)
 
 static void process_pong(const uint8_t *src_mac, const ping_payload_t *pong)
 {
-    uint32_t rtt = now_ms() - pong->sent_ms;
-    
-    ESP_LOGI(TAG, "PONG recibido de %02x:%02x:%02x:%02x:%02x:%02x — RTT=%lu ms",
-             src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
-             (unsigned long)rtt);
+    // Calculamos el RTT real
+    s_last_rtt = now_ms() - pong->sent_ms;
+    s_pong_received = true;
 
-    extern uint32_t last_known_latency;
-    last_known_latency = rtt;
-
-    for (int i = 0; i < s_pending_count; i++) {
-        if (s_pending_pings[i].seq == pong->ping_seq) {
-            s_pending_pings[i] = s_pending_pings[--s_pending_count];
-            break;
-        }
+    if (s_tx_task_handle != NULL) {
+        xTaskNotifyGive(s_tx_task_handle); //Despertar la tarea de envío para que procese el resultado del ping
     }
 }
 
@@ -228,8 +148,8 @@ static void rx_task(void *arg)
 
         case MSG_METRICS:
             if (esp_mesh_is_root()) {
-                extern uint32_t last_known_latency;
-                pkt->payload.metrics.latency_ms = last_known_latency;
+                // El Root solo imprime el log y lo manda a MQTT.
+                // La latencia ya viene perfectamente calculada desde el hijo.
                 ESP_LOGI(TAG, "Métricas de %02x:%02x:%02x:%02x:%02x:%02x"
                          " | capa=%d rssi=%d dBm latency=%lu ms",
                          MAC2STR(pkt->hdr.src_mac),
@@ -242,13 +162,17 @@ static void rx_task(void *arg)
             }
             break;
 
-        case MSG_PING:
-            ESP_LOGD(TAG, "PING de %02x:%02x:%02x:%02x:%02x:%02x", MAC2STR(from.addr));
-            reply_pong(&from, &pkt->payload.ping);
+            case MSG_PING:
+                ESP_LOGI(TAG, "He recibido un PING de %02x:%02x:%02x:%02x:%02x:%02x. ¡Contestando PONG!", MAC2STR(pkt->hdr.src_mac));
+                
+                mesh_addr_t target_mac;
+                memcpy(target_mac.addr, pkt->hdr.src_mac, 6);
+                
+                reply_pong(&target_mac, &pkt->payload.ping);
             break;
 
         case MSG_PONG:
-            if (esp_mesh_is_root()) process_pong(pkt->hdr.src_mac, &pkt->payload.ping);
+            if (!esp_mesh_is_root()) process_pong(pkt->hdr.src_mac, &pkt->payload.ping);
             break;
 
         default:
@@ -261,41 +185,70 @@ static void rx_task(void *arg)
 
 static void tx_metrics_task(void *arg)
 {
-    xEventGroupWaitBits(s_mesh_evt_group, MESH_CONNECTED_BIT,
-                        pdFALSE, pdTRUE, portMAX_DELAY);
+
+    s_tx_task_handle = xTaskGetCurrentTaskHandle();
+
+    xEventGroupWaitBits(s_mesh_evt_group, MESH_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     while (true) {
-        if (!esp_mesh_is_root()) {
-            ESP_LOGI(TAG, "Enviando métricas al root...");
-            send_metrics_to_root();
+        if (!esp_mesh_is_root() && s_root_known) {
+            
+            // ─── FASE 1: ENVIAR EL PING ───
+            s_pong_received = false;
+            s_last_rtt = 0;
+
+            mesh_packet_t ping_pkt;
+            build_header(&ping_pkt.hdr, MSG_PING);
+            ping_pkt.payload.ping.ping_seq = ++s_ping_seq;
+            ping_pkt.payload.ping.sent_ms  = now_ms();
+
+            mesh_data_t ping_data = {
+                .data  = (uint8_t *)&ping_pkt,
+                .size  = MESH_PACKET_SIZE,
+                .proto = MESH_PROTO_BIN,
+                .tos   = MESH_TOS_P2P,
+            };
+            ESP_LOGI(TAG, "[Ciclo] 1. Enviando PING seq=%lu...", (unsigned long)s_ping_seq);
+            esp_mesh_send(&s_root_addr, &ping_data, MESH_DATA_P2P, NULL, 0);
+
+            // ─── FASE 2: LA ESPERA BLOQUEANTE CON TIMEOUT (2 SEGUNDOS) ───
+            uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
+
+            // ─── FASE 3: EVALUAR QUÉ HA PASADO ───
+            if (notified > 0 && s_pong_received) {
+                ESP_LOGI(TAG, "[Ciclo] 2. PONG recibido a tiempo. RTT=%lu ms", (unsigned long)s_last_rtt);
+            } else {
+                // FALLO / PÉRDIDA: Se agotaron los 2 segundos y nadie respondió
+                ESP_LOGW(TAG, "NOTIFICACIÓN NO RECIBIDA: ulTaskNotifyTake devolvió %lu", (unsigned long)notified);
+                ESP_LOGW(TAG, "s_pong_received=%d", s_pong_received);
+
+      
+                metrics_record_ping_loss(); 
+                
+                s_last_rtt = 0; 
+            }
+
+            // ─── FASE 4: ENVIAR LA MÉTRICA CON EL RESULTADO REAL ───
+            mesh_packet_t metrics_pkt;
+            build_header(&metrics_pkt.hdr, MSG_METRICS);
+            metrics_collect(&metrics_pkt.payload.metrics); 
+
+            
+            metrics_pkt.payload.metrics.latency_ms = s_last_rtt; //latencia actualizada con el resultado del ping
+
+            mesh_data_t metrics_data = {
+                .data  = (uint8_t *)&metrics_pkt,
+                .size  = MESH_PACKET_SIZE,
+                .proto = MESH_PROTO_BIN,
+                .tos   = MESH_TOS_P2P,
+            };
+            ESP_LOGI(TAG, "[Ciclo] 3. Enviando JSON de métricas al Root...");
+            esp_mesh_send(&s_root_addr, &metrics_data, MESH_DATA_P2P, NULL, 0);
         }
+
+   
         vTaskDelay(pdMS_TO_TICKS(CONFIG_MESH_TX_INTERVAL_MS));
-    }
-}
-
-/* ─── Tarea de ping (solo root) ──────────────────────────────────────────── */
-
-static void ping_task(void *arg)
-{
-    ESP_LOGI(TAG, "Esperando conexión a la red mesh para arrancar tarea de ping...");
-    xEventGroupWaitBits(s_mesh_evt_group,
-                        MESH_CONNECTED_BIT,
-                        pdFALSE, pdTRUE, portMAX_DELAY);
-
-    if (!esp_mesh_is_root()) {
-        ESP_LOGI(TAG, "No somos root, no arrancamos tarea de ping");
-        vTaskDelete(NULL);
-        return;
-    }
-    vTaskDelay(pdMS_TO_TICKS(5000));
-
-    while (true) {
-        ESP_LOGI(TAG, "Enviando ping a todos los nodos...");
-        ping_all_nodes();
-        mqtt_publish_topology();
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_MESH_PING_INTERVAL_MS));
-        ESP_LOGI(TAG, "Próximo ping en %d ms", CONFIG_MESH_PING_INTERVAL_MS);
     }
 }
 
@@ -307,7 +260,7 @@ static void ip_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
         
 
         if (esp_mesh_is_root()) {
-            ESP_LOGI(TAG, "============= ¡BINGO! TENEMOS IP COMO ROOT: " IPSTR " =============", IP2STR(&event->ip_info.ip));
+            ESP_LOGI(TAG, "============= TENEMOS IP COMO ROOT: " IPSTR " =============", IP2STR(&event->ip_info.ip));
             ESP_LOGI(TAG, "Iniciando cliente MQTT...");
             mqtt_handler_start();
         } else {
@@ -348,14 +301,11 @@ static void mesh_event_handler(void *arg, esp_event_base_t base,
         break;
 
     case MESH_EVENT_ROOT_ADDRESS:
-        /* Este evento indica qué nodo es el root — guardamos su MAC */
+    
         memcpy(s_root_addr.addr, ev->root_addr.addr, 6);
         s_root_known = true;
         ESP_LOGI(TAG, "Root elegido: %02x:%02x:%02x:%02x:%02x:%02x", MAC2STR(s_root_addr.addr));
         break;
-
-    /* Nota: MESH_EVENT_ROOT_GOT_IP y MESH_EVENT_ROOT_LOST_IP fueron removidos en ESP-IDF 5.x.
-       Los eventos de IP ahora se manejan a través de IP_EVENT en el subsistema de eventos */
 
     case MESH_EVENT_TODS_STATE:
         ESP_LOGI(TAG, "ToDS: %s",
@@ -428,8 +378,7 @@ esp_err_t mesh_handler_init(void)
     /* ── Tareas ──────────────────────────────────────────────────────────── */
     xTaskCreate(rx_task,         "mesh_rx",   4096, NULL, 5, NULL); //Tarea de recepción con prioridad alta
     xTaskCreate(tx_metrics_task, "mesh_tx",   4096, NULL, 4, NULL); //Tarea de envío de métricas con prioridad media
-    xTaskCreate(ping_task,       "mesh_ping", 3072, NULL, 3, NULL); //Tarea de ping con prioridad baja (solo root)
-
+   
     /* ── Arrancar ────────────────────────────────────────────────────────── */
     ESP_ERROR_CHECK(esp_mesh_start());
 

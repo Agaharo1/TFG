@@ -16,6 +16,7 @@ static uint32_t s_tx_count   = 0;
 static uint32_t s_rx_count   = 0;
 static uint32_t s_tx_fail    = 0;
 static uint32_t s_latency_ms = 0;   /* último RTT medido */
+static uint32_t s_ping_lost_count = 0;
 
 /* ─── Noise floor empírico para estimar SNR ──────────────────────────────── */
 #define NOISE_FLOOR_DBM  (-95)
@@ -31,6 +32,14 @@ esp_err_t metrics_init(void)
     }
     ESP_LOGI(TAG, "Módulo de métricas inicializado");
     return ESP_OK;
+}
+
+
+void metrics_record_ping_loss(void)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_ping_lost_count++;
+    xSemaphoreGive(s_mutex);
 }
 
 void metrics_collect(metrics_payload_t *m)
@@ -77,6 +86,7 @@ void metrics_collect(metrics_payload_t *m)
     m->rx_count   = s_rx_count;
     m->tx_fail    = s_tx_fail;
     m->latency_ms = s_latency_ms;
+    m->ping_lost_count = s_ping_lost_count;
     xSemaphoreGive(s_mutex);
 
     /* ── Sistema ─────────────────────────────────────────────────────────── */

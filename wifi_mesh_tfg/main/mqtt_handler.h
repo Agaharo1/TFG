@@ -25,10 +25,6 @@ esp_err_t mqtt_handler_start(void);
 void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
                           uint32_t seq);
 
-/**
- * @brief Publica un snapshot de la topología mesh actual.
- */
-void mqtt_publish_topology(void);
 
 /**
  * @brief Devuelve true si el cliente MQTT está conectado al broker.
@@ -36,4 +32,4 @@ void mqtt_publish_topology(void);
 bool mqtt_is_connected(void);
 
 
-void mqtt_publish_latency(const uint8_t *mac, uint32_t latency_ms);
+
