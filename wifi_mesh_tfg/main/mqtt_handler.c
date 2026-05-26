@@ -146,7 +146,7 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     cJSON_AddNumberToObject(root, "latency_ms",     (double)m->latency_ms);
     cJSON_AddNumberToObject(root, "free_heap",      (double)m->free_heap);
     cJSON_AddNumberToObject(root, "uptime_s",       (double)m->uptime_s);
-
+    cJSON_AddNumberToObject(root, "ping_lost_count", (double)m->ping_lost_count);
     /* MAC como string para identificación rápida */
     char mac_str[18];
     snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",

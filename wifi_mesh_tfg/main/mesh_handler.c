@@ -331,6 +331,7 @@ esp_err_t mesh_handler_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE)); // Deshabilitamos el power save para evitar latencias adicionales en la recepción de paquetes REVISAR ESTO ES IMPRESIONANTE EL CAMBIO EN LAS LATENCIAS A MEJORADO MUCHISIMO
     /* MAC propia — válida solo después de esp_wifi_start()               */
     ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_STA, s_my_mac));
     ESP_LOGI(TAG, "MAC del nodo: %02x:%02x:%02x:%02x:%02x:%02x", MAC2STR(s_my_mac));
