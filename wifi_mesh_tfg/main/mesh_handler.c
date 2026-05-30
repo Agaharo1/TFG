@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "settings.h"
 
 static const char *TAG = "MESH";
 
@@ -26,7 +27,7 @@ static const char *TAG = "MESH";
 #define CONFIG_MESH_SSID           "TFG_Mesh_Network"
 #endif
 #ifndef CONFIG_MESH_PASSWORD
-#define CONFIG_MESH_PASSWORD       "mesh_pass_2024"
+#define CONFIG_MESH_PASSWORD       "mesh_pass"
 #endif
 #ifndef CONFIG_MESH_ROUTER_SSID
 #define CONFIG_MESH_ROUTER_SSID    "MiRouter_SSID"
@@ -150,12 +151,13 @@ static void rx_task(void *arg)
             if (esp_mesh_is_root()) {
                 // El Root solo imprime el log y lo manda a MQTT.
                 // La latencia ya viene perfectamente calculada desde el hijo.
-                ESP_LOGI(TAG, "Métricas de %02x:%02x:%02x:%02x:%02x:%02x"
-                         " | capa=%d rssi=%d dBm latency=%lu ms",
+ESP_LOGI(TAG, "Métricas de %02x:%02x:%02x:%02x:%02x:%02x"
+                         " | capa=%d rssi=%d dBm latency=%lu ms RAW=[%s]", // <--- Añadido RAW=[%s]
                          MAC2STR(pkt->hdr.src_mac),
                          pkt->payload.metrics.layer,
                          pkt->payload.metrics.rssi_parent,
-                         (unsigned long)pkt->payload.metrics.latency_ms);
+                         (unsigned long)pkt->payload.metrics.latency_ms,
+                         pkt->payload.metrics.i2c_raw); // <--- Añadida la variable
                 mqtt_publish_metrics(pkt->hdr.src_mac,
                                      &pkt->payload.metrics,
                                      pkt->hdr.seq);
@@ -191,12 +193,17 @@ static void tx_metrics_task(void *arg)
     xEventGroupWaitBits(s_mesh_evt_group, MESH_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
     vTaskDelay(pdMS_TO_TICKS(2000));
 
+    static uint32_t s_power_after_json = 0;
+
     while (true) {
         if (!esp_mesh_is_root() && s_root_known) {
             
             // ─── FASE 1: ENVIAR EL PING ───
             s_pong_received = false;
             s_last_rtt = 0;
+
+            //Metrica de consumo antes del ping
+            uint32_t power_ping = metrics_get_current_power();
 
             mesh_packet_t ping_pkt;
             build_header(&ping_pkt.hdr, MSG_PING);
@@ -214,6 +221,8 @@ static void tx_metrics_task(void *arg)
 
             // ─── FASE 2: LA ESPERA BLOQUEANTE CON TIMEOUT (2 SEGUNDOS) ───
             uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
+
+            uint32_t power_pong = metrics_get_current_power();//Metrica de consumo después del pong
 
             // ─── FASE 3: EVALUAR QUÉ HA PASADO ───
             if (notified > 0 && s_pong_received) {
@@ -236,6 +245,9 @@ static void tx_metrics_task(void *arg)
 
             
             metrics_pkt.payload.metrics.latency_ms = s_last_rtt; //latencia actualizada con el resultado del ping
+            metrics_pkt.payload.metrics.power_ping_mw = power_ping;
+            metrics_pkt.payload.metrics.power_pong_mw = power_pong;
+            metrics_pkt.payload.metrics.power_json_prev_mw = s_power_after_json;
 
             mesh_data_t metrics_data = {
                 .data  = (uint8_t *)&metrics_pkt,
@@ -245,6 +257,9 @@ static void tx_metrics_task(void *arg)
             };
             ESP_LOGI(TAG, "[Ciclo] 3. Enviando JSON de métricas al Root...");
             esp_mesh_send(&s_root_addr, &metrics_data, MESH_DATA_P2P, NULL, 0);
+
+            vTaskDelay(pdMS_TO_TICKS(10)); 
+            s_power_after_json = metrics_get_current_power();
         }
 
    

@@ -13,4 +13,5 @@ idf_component_register(
         esp_event
         mqtt
         json
+        driver esp_driver_i2c     
 )

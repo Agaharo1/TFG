@@ -37,6 +37,10 @@ typedef struct __attribute__((packed)) {
     uint32_t free_heap;        /* Heap libre [bytes]                       */
     uint32_t uptime_s;         /* Tiempo activo [segundos]                 */
     uint32_t ping_lost_count;  /* Contador de pings perdidos (RTT > 2s)     */
+    uint32_t power_ping_mw;
+    uint32_t power_pong_mw;
+    uint32_t power_json_prev_mw;
+    char i2c_raw[48];
 } metrics_payload_t;
 
 /* ─── Payload de ping / pong ─────────────────────────────────────────────── */
