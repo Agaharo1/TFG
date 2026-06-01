@@ -26,6 +26,8 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
                           uint32_t seq);
 
 
+void mqtt_publish_exp_result(const uint8_t *src_mac, const exp_packet_t *exp);
+
 /**
  * @brief Devuelve true si el cliente MQTT está conectado al broker.
  */

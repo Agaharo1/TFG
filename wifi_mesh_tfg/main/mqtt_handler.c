@@ -91,7 +91,7 @@ esp_err_t mqtt_handler_start(void)
     esp_err_t ret = esp_mqtt_client_start(s_client);
     if (ret != ESP_OK) return ret;
 
-    /* Esperar conexión inicial (máx 15 s) */
+ 
     EventBits_t bits = xEventGroupWaitBits(s_evt_group, MQTT_CONNECTED_BIT,
                                            pdFALSE, pdTRUE,
                                            pdMS_TO_TICKS(15000));
@@ -107,7 +107,7 @@ bool mqtt_is_connected(void)
     return (xEventGroupGetBits(s_evt_group) & MQTT_CONNECTED_BIT) != 0;
 }
 
-/* ─── Serialización y publicación de métricas ────────────────────────────── */
+
 
 void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
                           uint32_t seq)
@@ -120,7 +120,6 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
         return;
     }
 
-    /* Construir topic */
     char topic[64];
     snprintf(topic, sizeof(topic), MQTT_TOPIC_METRICS_FMT,
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -147,10 +146,7 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     cJSON_AddNumberToObject(root, "free_heap",      (double)m->free_heap);
     cJSON_AddNumberToObject(root, "uptime_s",       (double)m->uptime_s);
     cJSON_AddNumberToObject(root, "ping_lost_count", (double)m->ping_lost_count);
-    cJSON_AddNumberToObject(root, "power_ping", (double)m->power_ping_mw);
-    cJSON_AddNumberToObject(root, "power_pong", (double)m->power_pong_mw);
     cJSON_AddNumberToObject(root, "power_json", (double)m->power_json_prev_mw);
-    /* MAC como string para identificación rápida */
     char mac_str[18];
     snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -164,6 +160,42 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
         free(payload);
     }
     cJSON_Delete(root);
+    
+}
+
+
+void mqtt_publish_exp_result(const uint8_t *src_mac, const exp_packet_t *exp)
+{
+    if (!mqtt_is_connected() || s_client == NULL) {
+        ESP_LOGW(TAG, "MQTT desconectado — descartando experimento");
+        return;
+    }
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "iot/mesh/node/%02x%02x%02x%02x%02x%02x/metrics/%lukb",
+             src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
+             (unsigned long)exp->kb);
+
+    char json_payload[256];
+    snprintf(json_payload, sizeof(json_payload),
+             "{\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+             "\"payload_kb\":%lu,"
+             "\"duration_ms\":%lu,"
+             "\"power_idle_mw\":%lu,"
+             "\"power_active_mw\":%lu}",
+             src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
+             (unsigned long)exp->kb,
+             (unsigned long)exp->time_ms,
+             (unsigned long)exp->p_idle,
+             (unsigned long)exp->p_active);
+
+    int msg_id = esp_mqtt_client_publish(s_client, topic, json_payload, 0, 0, 0);
+    
+    if (msg_id != -1) {
+        ESP_LOGI(TAG, "Experimento enviado al tópico: %s (msg_id=%d)", topic, msg_id);
+    } else {
+        ESP_LOGE(TAG, "Fallo al enviar por MQTT");
+    }
 }
 
 

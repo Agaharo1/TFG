@@ -11,6 +11,8 @@ typedef enum {
     MSG_PING    = 0x02,   /* root/nodo → nodo: solicitud de latencia       */
     MSG_PONG    = 0x03,   /* nodo → root: respuesta a ping con timestamp   */
     MSG_CMD     = 0x04,   /* root → nodo: comando remoto (futuro)          */
+    MSG_EXP_RESULT = 99, 
+    MSG_EXP_DUMMY = 100
 } mesh_msg_type_t;
 
 /* ─── Cabecera común a todos los mensajes ────────────────────────────────── */
@@ -37,11 +39,19 @@ typedef struct __attribute__((packed)) {
     uint32_t free_heap;        /* Heap libre [bytes]                       */
     uint32_t uptime_s;         /* Tiempo activo [segundos]                 */
     uint32_t ping_lost_count;  /* Contador de pings perdidos (RTT > 2s)     */
-    uint32_t power_ping_mw;
-    uint32_t power_pong_mw;
     uint32_t power_json_prev_mw;
     char i2c_raw[48];
 } metrics_payload_t;
+
+typedef struct
+{
+    mesh_hdr_t hdr;
+    uint32_t kb;
+    uint32_t time_ms;
+    uint32_t p_idle;
+    uint32_t p_active;
+} exp_packet_t;
+
 
 /* ─── Payload de ping / pong ─────────────────────────────────────────────── */
 typedef struct __attribute__((packed)) {
