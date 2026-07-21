@@ -11,24 +11,15 @@
 
 static const char *TAG = "MQTT";
 
-/* ─── Configuración del broker ──────────────────────────────────────────────
-   Sobreescribir en sdkconfig o definir aquí directamente.               */
-//#ifndef CONFIG_MQTT_BROKER_URI
-#define CONFIG_MQTT_BROKER_URI   "mqtt://192.168.1.33:1883"
-//#endif
-#ifndef CONFIG_MQTT_USERNAME
-#define CONFIG_MQTT_USERNAME     ""
-#endif
-#ifndef CONFIG_MQTT_PASSWORD
-#define CONFIG_MQTT_PASSWORD     ""
-#endif
 
-/* ─── Estado interno ─────────────────────────────────────────────────────── */
+
+
+
 static esp_mqtt_client_handle_t s_client = NULL;
 static EventGroupHandle_t       s_evt_group;
 #define MQTT_CONNECTED_BIT  BIT0
 
-/* ─── Callback del cliente MQTT ─────────────────────────────────────────── */
+
 static void mqtt_event_handler(void *arg, esp_event_base_t base,
                                 int32_t event_id, void *event_data)
 {
@@ -39,7 +30,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         ESP_LOGI(TAG, "Conectado al broker MQTT");
         xEventGroupSetBits(s_evt_group, MQTT_CONNECTED_BIT);
 
-        /* Publicar mensaje de presencia */
+   
         esp_mqtt_client_publish(s_client, MQTT_TOPIC_STATUS,
                                 "{\"root\":\"online\"}", 0, 1, 1);
         break;
@@ -59,7 +50,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
     }
 }
 
-/* ─── API pública ────────────────────────────────────────────────────────── */
+
 
 esp_err_t mqtt_handler_start(void)
 {
@@ -137,7 +128,7 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     cJSON_AddNumberToObject(root, "rx_count",       (double)m->rx_count);
     cJSON_AddNumberToObject(root, "tx_fail",        (double)m->tx_fail);
 
-    /* PDR = rx / (tx + rx) × 100 — aproximación sencilla */
+
     uint32_t total = m->tx_count + m->rx_count;
     float pdr = total > 0 ? (float)m->rx_count / total * 100.0f : 0.0f;
     cJSON_AddNumberToObject(root, "pdr_pct",        (double)pdr);

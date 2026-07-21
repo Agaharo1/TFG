@@ -11,7 +11,7 @@
 
 static const char *TAG = "METRICS";
 
-/* ─── Contadores internos (protegidos por mutex) ─────────────────────────── */
+
 static SemaphoreHandle_t s_mutex;
 static uint32_t s_tx_count   = 0;
 static uint32_t s_rx_count   = 0;
@@ -21,11 +21,11 @@ static uint32_t s_ping_lost_count = 0;
 static uint32_t s_power_mw = 0;
 static char s_i2c_hex[48] = "";
 
-/* ─── Noise floor empírico para estimar SNR ──────────────────────────────── */
+
 #define NOISE_FLOOR_DBM  (-95)
 
 
-// 2. Configuración I2C
+
 #define I2C_SLAVE_SCL_IO     22
 #define I2C_SLAVE_SDA_IO     21
 #define I2C_SLAVE_NUM        I2C_NUM_0
@@ -180,40 +180,38 @@ void metrics_collect(metrics_payload_t *m)
     if (!m) return;
     memset(m, 0, sizeof(*m));
 
-    /* ── Información de la capa mesh ────────────────────────────────────── */
-    m->layer        = (uint8_t)esp_mesh_get_layer();
-    m->hops_to_root = m->layer;          /* en árbol mesh layer == hops    */
 
-    /* Número de nodos hijos directos */
-    #define MAX_CHILD_NODES 50  /* Máximo tamaño de tabla de enrutamiento */
+    m->layer        = (uint8_t)esp_mesh_get_layer();
+    m->hops_to_root = m->layer;       
+
+    #define MAX_CHILD_NODES 50  
     mesh_addr_t child_table[MAX_CHILD_NODES];
     int child_num = 0;
     esp_mesh_get_routing_table(child_table,
                                MAX_CHILD_NODES * sizeof(mesh_addr_t),
                                &child_num);
-    /* child_num incluye todos los descendientes; aproximamos con subs directos */
+   
     m->connected_subs = (uint8_t)(child_num > 0 ? child_num : 0);
 
-    /* ── RSSI al padre ──────────────────────────────────────────────────── */
+
     mesh_addr_t parent_addr;
     wifi_ap_record_t ap_info;
 
     if (esp_mesh_get_parent_bssid(&parent_addr) == ESP_OK) {
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
             m->rssi_parent = ap_info.rssi;
-            /* SNR = RSSI - noise_floor (estimación conservadora) */
             m->snr_estimate = (int8_t)(ap_info.rssi - NOISE_FLOOR_DBM);
         }
     }
 
-    /* RSSI al router (solo tiene sentido en el root) */
+
     if (esp_mesh_is_root()) {
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
             m->rssi_router = ap_info.rssi;
         }
     }
 
-    /* ── Contadores con lock ─────────────────────────────────────────────── */
+
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     m->tx_count   = s_tx_count;
     m->rx_count   = s_rx_count;
@@ -223,7 +221,7 @@ void metrics_collect(metrics_payload_t *m)
     strncpy(m->i2c_raw, s_i2c_hex, sizeof(m->i2c_raw) - 1);
     xSemaphoreGive(s_mutex);
 
-    /* ── Sistema ─────────────────────────────────────────────────────────── */
+
     m->free_heap = esp_get_free_heap_size();
     m->uptime_s  = (uint32_t)(esp_timer_get_time() / 1000000ULL);
 }

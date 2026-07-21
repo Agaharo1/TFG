@@ -22,34 +22,9 @@
 
 static const char *TAG = "MESH";
 
-/* ─── Fallbacks por si Kconfig no los definió todavía ───────────────────── */
-#ifndef CONFIG_MESH_SSID
-#define CONFIG_MESH_SSID "TFG_Mesh_Network"
-#endif
-#ifndef CONFIG_MESH_PASSWORD
-#define CONFIG_MESH_PASSWORD "mesh_pass"
-#endif
-#ifndef CONFIG_MESH_ROUTER_SSID
-#define CONFIG_MESH_ROUTER_SSID "MiRouter_SSID"
-#endif
-#ifndef CONFIG_MESH_ROUTER_PASS
-#define CONFIG_MESH_ROUTER_PASS "router_password"
-#endif
-#ifndef CONFIG_MESH_MAX_LAYER
-#define CONFIG_MESH_MAX_LAYER 4
-#endif
-#ifndef CONFIG_MESH_TX_INTERVAL_MS
-#define CONFIG_MESH_TX_INTERVAL_MS 5000
-#endif
-#ifndef CONFIG_MESH_PING_INTERVAL_MS
-#define CONFIG_MESH_PING_INTERVAL_MS 10000
-#endif
-/* CONFIG_MESH_ROUTE_TABLE_SIZE es un Kconfig interno de esp_mesh (default 50) */
-#ifndef CONFIG_MESH_ROUTE_TABLE_SIZE
-#define CONFIG_MESH_ROUTE_TABLE_SIZE 50
-#endif
 
-/* ID de red mesh — 6 bytes únicos para este despliegue */
+
+
 static const uint8_t MESH_ID[6] = {0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
 
 /* ─── Estado ─────────────────────────────────────────────────────────────── */
@@ -58,7 +33,7 @@ static EventGroupHandle_t s_mesh_evt_group;
 #define ROUTER_CONNECTED_BIT BIT1
 
 static uint8_t s_my_mac[6] = {0};
-static mesh_addr_t s_root_addr = {{{0}}}; /* MAC del root elegido */
+static mesh_addr_t s_root_addr = {{{0}}}; 
 static bool s_root_known = false;
 
 static uint32_t s_tx_seq = 0;
@@ -72,7 +47,7 @@ static bool s_pong_received = false;
 
 
 
-/* ─── Helpers ────────────────────────────────────────────────────────────── */
+
 
 static inline uint32_t now_ms(void)
 {
@@ -175,7 +150,6 @@ float run_payload_metrics_power(const mesh_addr_t *root_addr, mesh_packet_t *pkt
 }
 
 
-/* ─── Responder PONG ─────────────────────────────────────────────────────── */
 
 static void reply_pong(const mesh_addr_t *requester, const ping_payload_t *ping)
 {
@@ -194,7 +168,6 @@ static void reply_pong(const mesh_addr_t *requester, const ping_payload_t *ping)
     esp_mesh_send(requester, &data, MESH_DATA_P2P, NULL, 0);
 }
 
-/* ─── Procesar PONG recibido en el root ──────────────────────────────────── */
 
 static void process_pong(const uint8_t *src_mac, const ping_payload_t *pong)
 {
@@ -208,7 +181,7 @@ static void process_pong(const uint8_t *src_mac, const ping_payload_t *pong)
     }
 }
 
-/* ─── Tarea RX ───────────────────────────────────────────────────────────── */
+
 
 static void rx_task(void *arg)
 {
@@ -288,7 +261,6 @@ static void rx_task(void *arg)
     }
 }
 
-/* ─── Tarea TX periódica ─────────────────────────────────────────────────── */
 
 static void tx_metrics_task(void *arg)
 {
@@ -323,7 +295,7 @@ static void tx_metrics_task(void *arg)
             ESP_LOGI(TAG, "[Ciclo] 1. Enviando PING seq=%lu...", (unsigned long)s_ping_seq);
             esp_mesh_send(&s_root_addr, &ping_data, MESH_DATA_P2P, NULL, 0);
 
-            //  FASE 2: LA ESPERA BLOQUEANTE CON TIMEOUT 
+     
             uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
           
             if (notified > 0 && s_pong_received)
@@ -387,7 +359,7 @@ static void ip_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
     }
 }
 
-/* ─── Event handler ──────────────────────────────────────────────────────── */
+
 
 static void mesh_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *data)
@@ -398,7 +370,7 @@ static void mesh_event_handler(void *arg, esp_event_base_t base,
     {
 
     case MESH_EVENT_STARTED:
-        /* Releer MAC tras arranque WiFi */
+      
         esp_wifi_get_mac(WIFI_IF_STA, s_my_mac);
         ESP_LOGI(TAG, "Mesh iniciada. MAC propia: %02x:%02x:%02x:%02x:%02x:%02x", MAC2STR(s_my_mac));
         break;
@@ -437,14 +409,12 @@ static void mesh_event_handler(void *arg, esp_event_base_t base,
     }
 }
 
-/* ─── Inicialización ─────────────────────────────────────────────────────── */
 
 esp_err_t mesh_handler_init(void)
 {
     s_mesh_evt_group = xEventGroupCreate();
 
-    /* ── WiFi ────────────────────────────────────────────────────────────── */
-    /* esp_netif para STA lo crea el caller (main.c) antes de llamar aquí  */
+   
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
@@ -467,15 +437,15 @@ esp_err_t mesh_handler_init(void)
     mesh_cfg_t cfg = MESH_INIT_CONFIG_DEFAULT();
 
     memcpy(cfg.mesh_id.addr, MESH_ID, 6);
-    cfg.channel = 0; /* 0 = scan automático del canal del router */
+    cfg.channel = 0;
 
-    /* Router externo */
+  
     cfg.router.ssid_len = (uint8_t)strlen(CONFIG_MESH_ROUTER_SSID);
     memcpy(cfg.router.ssid, CONFIG_MESH_ROUTER_SSID, cfg.router.ssid_len);
     memcpy(cfg.router.password, CONFIG_MESH_ROUTER_PASS,
            strlen(CONFIG_MESH_ROUTER_PASS));
 
-    /* AP interno mesh — la contraseña es lo importante */
+   
     const char mesh_password[] = "mesh_pass_2024";
     uint16_t pwd_len = strlen(mesh_password);
 
@@ -491,14 +461,14 @@ esp_err_t mesh_handler_init(void)
     ESP_ERROR_CHECK(esp_mesh_set_max_layer(CONFIG_MESH_MAX_LAYER));
     ESP_ERROR_CHECK(esp_mesh_set_ap_authmode(WIFI_AUTH_OPEN));
 
-    /* ── Módulo de métricas ──────────────────────────────────────────────── */
+
     ESP_ERROR_CHECK(metrics_init());
 
-    /* ── Tareas ──────────────────────────────────────────────────────────── */
-    xTaskCreate(rx_task, "mesh_rx", 4096, NULL, 5, NULL);         // Tarea de recepción con prioridad alta
-    xTaskCreate(tx_metrics_task, "mesh_tx", 4096, NULL, 4, NULL); // Tarea de envío de métricas con prioridad media
 
-    /* ── Arrancar ────────────────────────────────────────────────────────── */
+    xTaskCreate(rx_task, "mesh_rx", 4096, NULL, 5, NULL);      
+    xTaskCreate(tx_metrics_task, "mesh_tx", 4096, NULL, 4, NULL);
+
+  
     ESP_ERROR_CHECK(esp_mesh_start());
 
     ESP_LOGI(TAG, "ESP-MESH v5.x arrancado — esperando conexión...");
