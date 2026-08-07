@@ -19,21 +19,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "settings.h"
+#include "peripherals.h"
 
 static const char *TAG = "MESH";
 
-
-
-
 static const uint8_t MESH_ID[6] = {0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
 
-/* ─── Estado ─────────────────────────────────────────────────────────────── */
 static EventGroupHandle_t s_mesh_evt_group;
 #define MESH_CONNECTED_BIT BIT0
 #define ROUTER_CONNECTED_BIT BIT1
 
 static uint8_t s_my_mac[6] = {0};
-static mesh_addr_t s_root_addr = {{{0}}}; 
+static mesh_addr_t s_root_addr = {{{0}}};
 static bool s_root_known = false;
 
 static uint32_t s_tx_seq = 0;
@@ -44,10 +41,6 @@ static uint32_t s_last_rtt = 0;
 static bool s_pong_received = false;
 
 #define MAX_PENDING_PINGS 8
-
-
-
-
 
 static inline uint32_t now_ms(void)
 {
@@ -87,10 +80,10 @@ static void run_payload_experiment(uint32_t total_kb)
     for (uint32_t i = 0; i < total_kb; i++)
     {
         esp_mesh_send(&s_root_addr, &mesh_data, MESH_DATA_P2P, NULL, 0);
-        
-  
+
         uint32_t current_p = metrics_get_current_power();
-        if (current_p > max_power_active) {
+        if (current_p > max_power_active)
+        {
             max_power_active = current_p;
         }
 
@@ -103,7 +96,8 @@ static void run_payload_experiment(uint32_t total_kb)
     res_pkt.kb = total_kb;
     res_pkt.time_ms = duration_ms;
     res_pkt.p_idle = power_idle;
-    res_pkt.p_active = max_power_active; 
+    res_pkt.p_active = max_power_active;
+    res_pkt.ps_mode = peripherals_get_ps_mode();
 
     mesh_data_t res_data = {
         .data = (uint8_t *)&res_pkt,
@@ -113,7 +107,6 @@ static void run_payload_experiment(uint32_t total_kb)
     };
     esp_mesh_send(&s_root_addr, &res_data, MESH_DATA_P2P, NULL, 0);
 }
-
 
 float run_payload_metrics_power(const mesh_addr_t *root_addr, mesh_packet_t *pkt_to_send)
 {
@@ -127,29 +120,26 @@ float run_payload_metrics_power(const mesh_addr_t *root_addr, mesh_packet_t *pkt
 
     ESP_LOGI("METRICS_TX", "[Muestreo] Iniciando transmisión Wi-Fi Mesh...");
 
-
     esp_mesh_send(root_addr, &metrics_data, MESH_DATA_P2P, NULL, 0);
 
-  
     float max_power_during_tx = 0.0f;
-    
-   
-    for (int i = 0; i < 5; i++) {
+
+    for (int i = 0; i < 5; i++)
+    {
         float current_power = metrics_get_current_power();
-        
-        if (current_power > max_power_during_tx) {
+
+        if (current_power > max_power_during_tx)
+        {
             max_power_during_tx = current_power;
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(10)); 
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     ESP_LOGD("METRICS_TX", "[Muestreo] Pico de potencia detectado: %.2f mW", max_power_during_tx);
-    
+
     return max_power_during_tx;
 }
-
-
 
 static void reply_pong(const mesh_addr_t *requester, const ping_payload_t *ping)
 {
@@ -168,7 +158,6 @@ static void reply_pong(const mesh_addr_t *requester, const ping_payload_t *ping)
     esp_mesh_send(requester, &data, MESH_DATA_P2P, NULL, 0);
 }
 
-
 static void process_pong(const uint8_t *src_mac, const ping_payload_t *pong)
 {
 
@@ -180,8 +169,6 @@ static void process_pong(const uint8_t *src_mac, const ping_payload_t *pong)
         xTaskNotifyGive(s_tx_task_handle);
     }
 }
-
-
 
 static void rx_task(void *arg)
 {
@@ -215,12 +202,12 @@ static void rx_task(void *arg)
             if (esp_mesh_is_root())
             {
                 ESP_LOGI(TAG, "Métricas de %02x:%02x:%02x:%02x:%02x:%02x"
-                              " | capa=%d rssi=%d dBm latency=%lu ms RAW=[%s]", 
+                              " | capa=%d rssi=%d dBm latency=%lu ms RAW=[%s]",
                          MAC2STR(pkt->hdr.src_mac),
                          pkt->payload.metrics.layer,
                          pkt->payload.metrics.rssi_parent,
                          (unsigned long)pkt->payload.metrics.latency_ms,
-                         pkt->payload.metrics.i2c_raw); 
+                         pkt->payload.metrics.i2c_raw);
                 mqtt_publish_metrics(pkt->hdr.src_mac,
                                      &pkt->payload.metrics,
                                      pkt->hdr.seq);
@@ -241,7 +228,7 @@ static void rx_task(void *arg)
                 process_pong(pkt->hdr.src_mac, &pkt->payload.ping);
             break;
 
-        case MSG_EXP_RESULT: 
+        case MSG_EXP_RESULT:
             if (esp_mesh_is_root())
             {
                 exp_packet_t *exp = (exp_packet_t *)rx_buf;
@@ -250,6 +237,7 @@ static void rx_task(void *arg)
                 ESP_LOGW(TAG, " Tiempo de envío: %lu ms", (unsigned long)exp->time_ms);
                 ESP_LOGW(TAG, " Consumo en reposo: %lu mW", (unsigned long)exp->p_idle);
                 ESP_LOGW(TAG, " Pico maximo de consumo: %lu mW", (unsigned long)exp->p_active);
+                ESP_LOGW(TAG, " Modo Power Save: %d", exp->ps_mode);
                 ESP_LOGW(TAG, "====================================");
 
                 mqtt_publish_exp_result(pkt->hdr.src_mac, exp);
@@ -260,7 +248,6 @@ static void rx_task(void *arg)
         }
     }
 }
-
 
 static void tx_metrics_task(void *arg)
 {
@@ -277,7 +264,6 @@ static void tx_metrics_task(void *arg)
         if (!esp_mesh_is_root() && s_root_known)
         {
 
-       
             s_pong_received = false;
             s_last_rtt = 0;
 
@@ -295,16 +281,15 @@ static void tx_metrics_task(void *arg)
             ESP_LOGI(TAG, "[Ciclo] 1. Enviando PING seq=%lu...", (unsigned long)s_ping_seq);
             esp_mesh_send(&s_root_addr, &ping_data, MESH_DATA_P2P, NULL, 0);
 
-     
             uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
-          
+
             if (notified > 0 && s_pong_received)
             {
                 ESP_LOGI(TAG, "[Ciclo] 2. PONG recibido a tiempo. RTT=%lu ms", (unsigned long)s_last_rtt);
             }
             else
             {
-                // FALLO / PÉRDIDA: Se agotaron los 2 segundos y nadie respondió
+
                 ESP_LOGW(TAG, "NOTIFICACIÓN NO RECIBIDA: ulTaskNotifyTake devolvió %lu", (unsigned long)notified);
                 ESP_LOGW(TAG, "s_pong_received=%d", s_pong_received);
 
@@ -313,21 +298,19 @@ static void tx_metrics_task(void *arg)
                 s_last_rtt = 0;
             }
 
-        
             mesh_packet_t metrics_pkt;
             build_header(&metrics_pkt.hdr, MSG_METRICS);
             metrics_collect(&metrics_pkt.payload.metrics);
 
-            metrics_pkt.payload.metrics.latency_ms = s_last_rtt; 
+            metrics_pkt.payload.metrics.latency_ms = s_last_rtt;
             metrics_pkt.payload.metrics.power_json_prev_mw = s_power_after_json;
 
             s_power_after_json = run_payload_metrics_power(&s_root_addr, &metrics_pkt);
 
-
             vTaskDelay(pdMS_TO_TICKS(5000));
 
-            run_payload_experiment(1);  // 1 KB
-            vTaskDelay(pdMS_TO_TICKS(5000)); 
+            run_payload_experiment(1); // 1 KB
+            vTaskDelay(pdMS_TO_TICKS(5000));
 
             run_payload_experiment(10); //  10 KB
             vTaskDelay(pdMS_TO_TICKS(5000));
@@ -359,8 +342,6 @@ static void ip_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
     }
 }
 
-
-
 static void mesh_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *data)
 {
@@ -370,7 +351,7 @@ static void mesh_event_handler(void *arg, esp_event_base_t base,
     {
 
     case MESH_EVENT_STARTED:
-      
+
         esp_wifi_get_mac(WIFI_IF_STA, s_my_mac);
         ESP_LOGI(TAG, "Mesh iniciada. MAC propia: %02x:%02x:%02x:%02x:%02x:%02x", MAC2STR(s_my_mac));
         break;
@@ -383,6 +364,13 @@ static void mesh_event_handler(void *arg, esp_event_base_t base,
     case MESH_EVENT_PARENT_CONNECTED:
         ESP_LOGI(TAG, "Padre conectado — capa %d", esp_mesh_get_layer());
         xEventGroupSetBits(s_mesh_evt_group, MESH_CONNECTED_BIT);
+
+        static bool s_btn_started = false;
+        if (!esp_mesh_is_root() && !s_btn_started)
+        {
+            peripherals_start_button_task();
+            s_btn_started = true;
+        }
         break;
 
     case MESH_EVENT_PARENT_DISCONNECTED:
@@ -409,12 +397,10 @@ static void mesh_event_handler(void *arg, esp_event_base_t base,
     }
 }
 
-
 esp_err_t mesh_handler_init(void)
 {
     s_mesh_evt_group = xEventGroupCreate();
 
-   
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
@@ -439,13 +425,11 @@ esp_err_t mesh_handler_init(void)
     memcpy(cfg.mesh_id.addr, MESH_ID, 6);
     cfg.channel = 0;
 
-  
     cfg.router.ssid_len = (uint8_t)strlen(CONFIG_MESH_ROUTER_SSID);
     memcpy(cfg.router.ssid, CONFIG_MESH_ROUTER_SSID, cfg.router.ssid_len);
     memcpy(cfg.router.password, CONFIG_MESH_ROUTER_PASS,
            strlen(CONFIG_MESH_ROUTER_PASS));
 
-   
     const char mesh_password[] = "mesh_pass_2024";
     uint16_t pwd_len = strlen(mesh_password);
 
@@ -461,14 +445,12 @@ esp_err_t mesh_handler_init(void)
     ESP_ERROR_CHECK(esp_mesh_set_max_layer(CONFIG_MESH_MAX_LAYER));
     ESP_ERROR_CHECK(esp_mesh_set_ap_authmode(WIFI_AUTH_OPEN));
 
+    ESP_ERROR_CHECK(metrics_init()); // Empezar a medir las metricas, tambien se incia el i2c para sacar el consumo
+    ESP_ERROR_CHECK(peripherals_init());
 
-    ESP_ERROR_CHECK(metrics_init());
-
-
-    xTaskCreate(rx_task, "mesh_rx", 4096, NULL, 5, NULL);      
+    xTaskCreate(rx_task, "mesh_rx", 4096, NULL, 5, NULL);
     xTaskCreate(tx_metrics_task, "mesh_tx", 4096, NULL, 4, NULL);
 
-  
     ESP_ERROR_CHECK(esp_mesh_start());
 
     ESP_LOGI(TAG, "ESP-MESH v5.x arrancado — esperando conexión...");
@@ -481,7 +463,3 @@ bool mesh_is_ready(void)
         return false;
     return (xEventGroupGetBits(s_mesh_evt_group) & MESH_CONNECTED_BIT) != 0;
 }
-
-
-
-

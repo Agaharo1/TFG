@@ -133,7 +133,7 @@ mosquitto_sub -h localhost -t "iot/mesh/#" -v
 ```
 
 ### Acceder a Grafana
-Abrir `http://<IP_UBUNTU>:3000` → usuario `admin` / contraseña `grafana_pass`
+Abrir `http://192.168.1.37:3000` → usuario `admin` / contraseña `grafana_pass`
 
 **Configurar datasource InfluxDB:**
 - URL: `http://influxdb:8086`

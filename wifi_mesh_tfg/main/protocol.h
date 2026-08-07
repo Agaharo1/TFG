@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #define PROTO_VERSION       1
-
+#define MAX_PAYLOAD_SIZE sizeof(metrics_payload_t)
 
 typedef enum {
     MSG_METRICS = 0x01,   
@@ -40,6 +40,7 @@ typedef struct __attribute__((packed)) {
     uint32_t ping_lost_count;  
     uint32_t power_json_prev_mw;
     char i2c_raw[48];
+    uint8_t ps_mode;
 } metrics_payload_t;
 
 typedef struct
@@ -49,6 +50,7 @@ typedef struct
     uint32_t time_ms;
     uint32_t p_idle;
     uint32_t p_active;
+    uint8_t ps_mode;
 } exp_packet_t;
 
 
@@ -60,7 +62,7 @@ typedef struct __attribute__((packed)) {
 } ping_payload_t;
 
 
-#define MAX_PAYLOAD_SIZE sizeof(metrics_payload_t)
+
 
 typedef struct __attribute__((packed)) {
     mesh_hdr_t hdr;

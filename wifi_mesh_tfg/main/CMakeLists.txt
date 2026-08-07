@@ -4,6 +4,7 @@ idf_component_register(
         "mesh_handler.c"
         "mqtt_handler.c"
         "metrics.c"
+        "peripherals.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_wifi

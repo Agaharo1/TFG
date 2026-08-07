@@ -115,7 +115,7 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     snprintf(topic, sizeof(topic), MQTT_TOPIC_METRICS_FMT,
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    /* Construir JSON */
+   
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "seq",            (double)seq);
     cJSON_AddNumberToObject(root, "rssi_parent",    m->rssi_parent);
@@ -138,6 +138,7 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     cJSON_AddNumberToObject(root, "uptime_s",       (double)m->uptime_s);
     cJSON_AddNumberToObject(root, "ping_lost_count", (double)m->ping_lost_count);
     cJSON_AddNumberToObject(root, "power_json", (double)m->power_json_prev_mw);
+    cJSON_AddNumberToObject(root, "ps_mode", m->ps_mode);
     char mac_str[18];
     snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -169,16 +170,18 @@ void mqtt_publish_exp_result(const uint8_t *src_mac, const exp_packet_t *exp)
 
     char json_payload[256];
     snprintf(json_payload, sizeof(json_payload),
-             "{\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
-             "\"payload_kb\":%lu,"
-             "\"duration_ms\":%lu,"
-             "\"power_idle_mw\":%lu,"
-             "\"power_active_mw\":%lu}",
-             src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
-             (unsigned long)exp->kb,
-             (unsigned long)exp->time_ms,
-             (unsigned long)exp->p_idle,
-             (unsigned long)exp->p_active);
+                "{\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+                "\"payload_kb\":%lu,"
+                "\"duration_ms\":%lu,"
+                "\"power_idle_mw\":%lu,"
+                "\"power_active_mw\":%lu,"
+                "\"ps_mode\":%d}",
+                src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
+                (unsigned long)exp->kb,
+                (unsigned long)exp->time_ms,
+                (unsigned long)exp->p_idle,
+                (unsigned long)exp->p_active,
+                (int)exp->ps_mode);
 
     int msg_id = esp_mqtt_client_publish(s_client, topic, json_payload, 0, 0, 0);
     
