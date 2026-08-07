@@ -79,3 +79,6 @@ Desktop.ini
 *.sln.docstates # Visual Studio
 # InfluxDB data y configuraciones locales
 **/influx_data/
+
+#Para .png 
+*.png

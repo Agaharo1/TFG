@@ -3,12 +3,10 @@ import matplotlib.pyplot as plt
 from influxdb import DataFrameClient
 import os
 
-
 INFLUX_HOST = '192.168.1.37'
 INFLUX_PORT = 8086
 DB_NAME = 'sensores'
 MAC = '5c:01:3b:67:14:24'
-
 
 metricas_generales = {
     'latency_ms': 'Milisegundos (ms)',
@@ -36,7 +34,6 @@ metricas_separadas = {
 
 tamanos_payload = [1, 10, 100] # Tamaños en KB
 
-
 ps_modes = [0, 1, 2] 
 etiquetas_psmode = {
     0: "Max Rendimiento",
@@ -47,7 +44,6 @@ etiquetas_psmode = {
 print(f"Conectando a InfluxDB en {INFLUX_HOST}...")
 client = DataFrameClient(host=INFLUX_HOST, port=INFLUX_PORT, database=DB_NAME)
 
-
 if not os.path.exists('resultados_tfg'):
     os.makedirs('resultados_tfg')
 
@@ -56,8 +52,8 @@ for mode in ps_modes:
     if not os.path.exists(carpeta_modo):
         os.makedirs(carpeta_modo)
 
-
-def generar_grafica(query, nombre_metrica, unidad, carpeta_destino, titulo_extra=""):
+# Añadimos "sufijo_archivo" a la función
+def generar_grafica(query, nombre_metrica, unidad, carpeta_destino, titulo_extra="", sufijo_archivo=""):
     try:
         resultados = client.query(query)
         
@@ -73,7 +69,6 @@ def generar_grafica(query, nombre_metrica, unidad, carpeta_destino, titulo_extra
             plt.figure(figsize=(10, 5))
             plt.plot(minutos_transcurridos, df[nombre_metrica], color='#32CD32', linewidth=1.5) 
             
-         
             titulo = f'Evolucion de {nombre_metrica.upper()}' 
             if titulo_extra:
                 titulo += f'\n({titulo_extra})'
@@ -86,10 +81,10 @@ def generar_grafica(query, nombre_metrica, unidad, carpeta_destino, titulo_extra
             plt.xlim(left=0) 
             plt.tight_layout()
             
-         
-            nombre_archivo = titulo.replace('\n', ' ').replace('(', '').replace(')', '').replace('|', '').replace(':', '').replace(' - ', '_').replace(' ', '_').lower()
+            # --- LIMPIEZA DEL NOMBRE DEL ARCHIVO ---
+            # El nombre será exactamente la métrica (ej: latency_ms) + el sufijo si lo hay (ej: _10kb)
+            nombre_archivo = f"{nombre_metrica}{sufijo_archivo}"
             
-     
             ruta_archivo = f'{carpeta_destino}/{nombre_archivo}.png'
             
             plt.savefig(ruta_archivo, dpi=300)
@@ -101,7 +96,6 @@ def generar_grafica(query, nombre_metrica, unidad, carpeta_destino, titulo_extra
     except Exception as e:
         print(f" [ERROR] Fallo al procesar {nombre_metrica} en {carpeta_destino}: {e}")
 
-
 print("\n--- GENERANDO MÉTRICAS GENERALES POR PS_MODE ---")
 for metrica, unidad in metricas_generales.items():
     for mode in ps_modes:
@@ -109,8 +103,9 @@ for metrica, unidad in metricas_generales.items():
         carpeta_destino = f'resultados_tfg/ps_mode_{mode}'
         
         query = f"SELECT mean(\"{metrica}\") AS \"{metrica}\" FROM \"mqtt_consumer\" WHERE (\"mac\"::tag = '{MAC}') AND \"ps_mode\" = {mode} GROUP BY time(10s) fill(linear)"
+        
+        # Al no enviarle sufijo_archivo, se guardará como 'latency_ms.png'
         generar_grafica(query, metrica, unidad, carpeta_destino, titulo_extra=f"PS_MODE: {mode} - {etiqueta_modo}")
-
 
 print("\n--- GENERANDO MÉTRICAS CRUZADAS (PAYLOAD + PS_MODE) ---")
 for metrica, unidad in metricas_separadas.items():
@@ -123,5 +118,5 @@ for metrica, unidad in metricas_separadas.items():
             
             titulo_ext = f"Payload {kb}KB | PS_MODE {mode} ({etiqueta_modo})"
             
-            generar_grafica(query, metrica, unidad, carpeta_destino, titulo_extra=titulo_ext)
-
+            # Le pasamos el tamaño en KB para que quede como 'duration_ms_10kb.png'
+            generar_grafica(query, metrica, unidad, carpeta_destino, titulo_extra=titulo_ext, sufijo_archivo=f"_{kb}kb")
