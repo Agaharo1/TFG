@@ -20,3 +20,5 @@ void metrics_update_latency(uint32_t rtt_ms);
 
 
 uint32_t metrics_get_current_power(void);
+
+

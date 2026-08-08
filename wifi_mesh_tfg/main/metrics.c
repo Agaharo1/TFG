@@ -15,7 +15,7 @@ static SemaphoreHandle_t s_mutex = NULL;
 static uint32_t s_tx_count        = 0;
 static uint32_t s_rx_count        = 0;
 static uint32_t s_tx_fail         = 0;
-static uint32_t s_latency_ms      = 0;   /* último RTT medido */
+static uint32_t s_latency_ms      = 0;   
 static uint32_t s_ping_lost_count = 0;
 
 #define NOISE_FLOOR_DBM  (-95)

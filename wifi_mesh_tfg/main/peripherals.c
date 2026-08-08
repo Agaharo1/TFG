@@ -12,14 +12,14 @@
 
 static const char *TAG = "PERIPHERALS";
 
-// --- CONFIGURACIÓN DE PINES Y BUSES ---
+
 #define BUTTON_PIN          GPIO_NUM_16
 #define I2C_SLAVE_SCL_IO    22
 #define I2C_SLAVE_SDA_IO    21
 #define I2C_SLAVE_NUM       I2C_NUM_0
 #define ESP_SLAVE_ADDR      0x3F
 
-// Variables privadas del módulo
+
 static SemaphoreHandle_t s_periph_mutex = NULL;
 static uint32_t s_power_mw = 0;
 static char s_i2c_hex[48] = "";

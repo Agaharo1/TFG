@@ -58,11 +58,12 @@ static void build_header(mesh_hdr_t *hdr, mesh_msg_type_t type)
 
 static void run_payload_experiment(uint32_t total_kb)
 {
-
     uint8_t dummy_data[1000];
     memset(dummy_data, 0xAA, sizeof(dummy_data));
-    mesh_packet_t pkt;
-    build_header(&pkt.hdr, MSG_EXP_DUMMY);
+
+
+    mesh_hdr_t *dummy_hdr = (mesh_hdr_t *)dummy_data;
+    build_header(dummy_hdr, MSG_EXP_DUMMY);
 
     mesh_data_t mesh_data = {
         .data = dummy_data,
@@ -79,7 +80,10 @@ static void run_payload_experiment(uint32_t total_kb)
     uint32_t start_time = now_ms();
     for (uint32_t i = 0; i < total_kb; i++)
     {
-        esp_mesh_send(&s_root_addr, &mesh_data, MESH_DATA_P2P, NULL, 0);
+    
+        esp_err_t err = esp_mesh_send(&s_root_addr, &mesh_data, MESH_DATA_P2P, NULL, 0);
+      
+        metrics_record_tx(err == ESP_OK);
 
         uint32_t current_p = metrics_get_current_power();
         if (current_p > max_power_active)
@@ -105,7 +109,9 @@ static void run_payload_experiment(uint32_t total_kb)
         .proto = MESH_PROTO_BIN,
         .tos = MESH_TOS_P2P,
     };
-    esp_mesh_send(&s_root_addr, &res_data, MESH_DATA_P2P, NULL, 0);
+
+    esp_err_t res_err = esp_mesh_send(&s_root_addr, &res_data, MESH_DATA_P2P, NULL, 0);
+    metrics_record_tx(res_err == ESP_OK);
 }
 
 float run_payload_metrics_power(const mesh_addr_t *root_addr, mesh_packet_t *pkt_to_send)
@@ -120,7 +126,8 @@ float run_payload_metrics_power(const mesh_addr_t *root_addr, mesh_packet_t *pkt
 
     ESP_LOGI("METRICS_TX", "[Muestreo] Iniciando transmisión Wi-Fi Mesh...");
 
-    esp_mesh_send(root_addr, &metrics_data, MESH_DATA_P2P, NULL, 0);
+    esp_err_t err = esp_mesh_send(root_addr, &metrics_data, MESH_DATA_P2P, NULL, 0);
+    metrics_record_tx(err == ESP_OK);
 
     float max_power_during_tx = 0.0f;
 
@@ -155,7 +162,8 @@ static void reply_pong(const mesh_addr_t *requester, const ping_payload_t *ping)
         .proto = MESH_PROTO_BIN,
         .tos = MESH_TOS_P2P,
     };
-    esp_mesh_send(requester, &data, MESH_DATA_P2P, NULL, 0);
+    esp_err_t err = esp_mesh_send(requester, &data, MESH_DATA_P2P, NULL, 0);
+    metrics_record_tx(err == ESP_OK);
 }
 
 static void process_pong(const uint8_t *src_mac, const ping_payload_t *pong)
@@ -279,7 +287,8 @@ static void tx_metrics_task(void *arg)
                 .tos = MESH_TOS_P2P,
             };
             ESP_LOGI(TAG, "[Ciclo] 1. Enviando PING seq=%lu...", (unsigned long)s_ping_seq);
-            esp_mesh_send(&s_root_addr, &ping_data, MESH_DATA_P2P, NULL, 0);
+            esp_err_t ping_err = esp_mesh_send(&s_root_addr, &ping_data, MESH_DATA_P2P, NULL, 0);
+            metrics_record_tx(ping_err == ESP_OK);
 
             uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
 
