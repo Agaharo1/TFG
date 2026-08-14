@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from influxdb import DataFrameClient
 import os
 
-INFLUX_HOST = '192.168.1.37'
+INFLUX_HOST = '192.168.1.35'
 INFLUX_PORT = 8086
 DB_NAME = 'sensores'
 MAC = '5c:01:3b:67:14:24'

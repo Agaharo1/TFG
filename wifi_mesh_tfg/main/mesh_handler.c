@@ -58,7 +58,7 @@ static void build_header(mesh_hdr_t *hdr, mesh_msg_type_t type)
 
 static void run_payload_experiment(uint32_t total_kb)
 {
-    uint8_t dummy_data[1000];
+    uint8_t dummy_data[DUMMY_EXPERIMENT_SIZE];
     memset(dummy_data, 0xAA, sizeof(dummy_data));
 
 
@@ -180,7 +180,7 @@ static void process_pong(const uint8_t *src_mac, const ping_payload_t *pong)
 
 static void rx_task(void *arg)
 {
-    static uint8_t rx_buf[MESH_PACKET_SIZE + 64];
+    static uint8_t rx_buf[MAX_MESH_MSG_SIZE  + 64];
     mesh_addr_t from;
     mesh_data_t data;
     int flag = 0;
@@ -203,6 +203,11 @@ static void rx_task(void *arg)
         if (pkt->hdr.version != PROTO_VERSION)
             continue;
 
+        if (esp_mesh_is_root())
+        {
+            metrics_record_seq(pkt->hdr.src_mac, pkt->hdr.seq);
+        }
+        
         switch ((mesh_msg_type_t)pkt->hdr.type)
         {
 

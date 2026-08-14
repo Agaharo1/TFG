@@ -15,6 +15,12 @@ typedef enum {
 } mesh_msg_type_t;
 
 
+#define DUMMY_EXPERIMENT_SIZE 1000
+
+#define MAX_MESH_MSG_SIZE ((DUMMY_EXPERIMENT_SIZE) > (int)sizeof(mesh_packet_t) ? \
+                            (DUMMY_EXPERIMENT_SIZE) : (int)sizeof(mesh_packet_t))
+
+
 typedef struct __attribute__((packed)) {
     uint8_t  version;         
     uint8_t  type;            

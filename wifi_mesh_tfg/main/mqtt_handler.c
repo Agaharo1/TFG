@@ -8,6 +8,7 @@
 #include "freertos/event_groups.h"
 #include <stdio.h>
 #include <string.h>
+#include "metrics.h"
 
 static const char *TAG = "MQTT";
 
@@ -115,7 +116,8 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     snprintf(topic, sizeof(topic), MQTT_TOPIC_METRICS_FMT,
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-   
+   float real_pdr = metrics_get_pdr_pct(mac);
+
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "seq",            (double)seq);
     cJSON_AddNumberToObject(root, "rssi_parent",    m->rssi_parent);
@@ -127,12 +129,7 @@ void mqtt_publish_metrics(const uint8_t *mac, const metrics_payload_t *m,
     cJSON_AddNumberToObject(root, "tx_count",       (double)m->tx_count);
     cJSON_AddNumberToObject(root, "rx_count",       (double)m->rx_count);
     cJSON_AddNumberToObject(root, "tx_fail",        (double)m->tx_fail);
-
-
-    uint32_t total = m->tx_count + m->rx_count;
-    float pdr = total > 0 ? (float)m->rx_count / total * 100.0f : 0.0f;
-    cJSON_AddNumberToObject(root, "pdr_pct",        (double)pdr);
-
+    cJSON_AddNumberToObject(root, "pdr_pct",        (double)real_pdr);
     cJSON_AddNumberToObject(root, "latency_ms",     (double)m->latency_ms);
     cJSON_AddNumberToObject(root, "free_heap",      (double)m->free_heap);
     cJSON_AddNumberToObject(root, "uptime_s",       (double)m->uptime_s);
