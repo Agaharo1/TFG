@@ -1,14 +1,4 @@
-/* main.c - VENDOR CLIENT / PROVISIONER CENTRAL ("PONGER")
- *
- * Este nodo sigue siendo el PROVISIONER (provisiona a todos los nodos
- * "pinger" que se anuncien con el UUID esperado), pero ya NO inicia
- * pings. Ahora aloja un modelo vendor SERVER: se queda esperando PINGs
- * de cualquier nodo ya provisionado y responde con PONG.
- *
- * Como solo existe UN provisioner en esta topología (N nodos -> 1
- * cliente central), su dirección puede volver a ser fija: no hay
- * riesgo de colisión entre "dos provisioners" como antes.
- */
+
 
 #include <stdio.h>
 #include <string.h>
@@ -26,12 +16,13 @@
 
 #include "ble_mesh_example_init.h"
 #include "ble_mesh_example_nvs.h"
-
+#include "wifi.h"
+#include "mqtt.h"
 
 #define TAG "EXAMPLE_CLIENT"
 
 #define CID_ESP             0x02E5
-#define PROV_OWN_ADDR       0x0001   /* Fija: solo hay UN provisioner en esta topología */
+#define PROV_OWN_ADDR       0x0001   
 #define PROV_START_ADDR     0x0005
 #define MSG_SEND_TTL        3
 #define MSG_TIMEOUT         0
@@ -40,28 +31,100 @@
 #define APP_KEY_IDX         0x0000
 #define APP_KEY_OCTET       0x12
 
-/* IMPORTANTE: estas dos constantes deben coincidir EXACTAMENTE (mismo
- * valor) con las del firmware de los nodos "pinger". El nombre CLIENT/
- * SERVER ahora describe el rol dentro del intercambio PING-PONG, no
- * quién provisiona a quién:
- *   - VND_MODEL_ID_CLIENT: quien INICIA el ping (ahora: cada nodo)
- *   - VND_MODEL_ID_SERVER: quien RESPONDE el pong (ahora: este cliente) */
 #define ESP_BLE_MESH_VND_MODEL_ID_CLIENT    0x0000
 #define ESP_BLE_MESH_VND_MODEL_ID_SERVER    0x0001
 
-#define ESP_BLE_MESH_VND_MODEL_OP_PING      ESP_BLE_MESH_MODEL_OP_3(0x01, CID_ESP)
-#define ESP_BLE_MESH_VND_MODEL_OP_PONG      ESP_BLE_MESH_MODEL_OP_3(0x02, CID_ESP)
+#define ESP_BLE_MESH_VND_MODEL_OP_PING       ESP_BLE_MESH_MODEL_OP_3(0x01, CID_ESP)
+#define ESP_BLE_MESH_VND_MODEL_OP_PONG       ESP_BLE_MESH_MODEL_OP_3(0x02, CID_ESP)
+/* NUEVOS opcodes para la fase de transferencia de datos (1KB/10KB/100KB) */
+#define ESP_BLE_MESH_VND_MODEL_OP_DATA_CHUNK ESP_BLE_MESH_MODEL_OP_3(0x03, CID_ESP)
+#define ESP_BLE_MESH_VND_MODEL_OP_DATA_ACK   ESP_BLE_MESH_MODEL_OP_3(0x04, CID_ESP)
 
 typedef struct __attribute__((packed)) {
     uint16_t seq_num;
+    uint16_t total_in_round;  
     int64_t  timestamp;
 } ping_payload_t;
 
+
+#define DATA_CHUNK_PAYLOAD_MAX  250
+
+typedef struct __attribute__((packed)) {
+    uint16_t seq_num;
+    uint16_t total_chunks;
+    uint16_t crc16;
+    uint8_t  data[DATA_CHUNK_PAYLOAD_MAX];
+} data_chunk_payload_t;
+
+#define DATA_CHUNK_HEADER_SIZE  (sizeof(uint16_t) * 3)  
+
+typedef struct __attribute__((packed)) {
+    uint16_t seq_num;
+    uint8_t  crc_ok;
+} data_ack_payload_t;
+
+
+static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
+{
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= (uint16_t)data[i] << 8;
+        for (int b = 0; b < 8; b++) {
+            crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+#define ASSUMED_NOISE_FLOOR_DBM  (-95)
+
+typedef struct {
+    int32_t  sum;
+    int16_t  min;
+    int16_t  max;
+    uint16_t count;
+} rssi_stats_t;
+
+static void rssi_stats_reset(rssi_stats_t *s)
+{
+    s->sum = 0;
+    s->count = 0;
+    s->min = INT16_MAX;
+    s->max = INT16_MIN;
+}
+
+static void rssi_stats_add(rssi_stats_t *s, int8_t rssi)
+{
+    s->sum += rssi;
+    s->count++;
+    if (rssi < s->min) s->min = rssi;
+    if (rssi > s->max) s->max = rssi;
+}
+
+static void rssi_stats_log(const char *tag_prefix, const rssi_stats_t *s)
+{
+    if (s->count == 0) {
+        ESP_LOGW(TAG, "%s: sin muestras de RSSI", tag_prefix);
+        return;
+    }
+    float avg = (float)s->sum / s->count;
+    float snr_estimate = avg - ASSUMED_NOISE_FLOOR_DBM;
+    ESP_LOGI(TAG, "%s: RSSI min/avg/max = %d / %.1f / %d dBm (n=%d) | SNR estimado (avg): %.1f dB",
+             tag_prefix, s->min, avg, s->max, s->count, snr_estimate);
+}
+
+static rssi_stats_t ping_rssi_stats;
+static rssi_stats_t data_rssi_stats;
+
+
+static uint16_t ping_received_count   = 0;
+static uint16_t data_chunks_received  = 0;
+static uint16_t data_crc_fail_count   = 0;
+static uint32_t data_bytes_received   = 0;
+
 static uint8_t dev_uuid[ESP_BLE_MESH_OCTET16_LEN];
 
-/* Guarda el ÚLTIMO nodo provisionado, solo a título informativo/NVS
- * (ya no se usa para dirigir pings, porque ahora el cliente no envía
- * pings a nadie: son los nodos quienes le escriben a él). */
+
 static struct example_info_store {
     uint16_t last_node_addr;
     uint16_t vnd_tid;
@@ -94,12 +157,10 @@ static esp_ble_mesh_cfg_srv_t config_server = {
 
 static esp_ble_mesh_client_t config_client;
 
-/* Modelo vendor LOCAL de este nodo: ahora es un modelo SERVER (pasivo,
- * solo responde). Ya no necesita esp_ble_mesh_client_t/op_pair, porque
- * ese struct es para modelos que INICIAN mensajes con seguimiento de
- * respuesta -- eso ahora vive en cada nodo, no aquí. */
+
 static esp_ble_mesh_model_op_t vnd_op[] = {
     ESP_BLE_MESH_MODEL_OP(ESP_BLE_MESH_VND_MODEL_OP_PING, sizeof(ping_payload_t)),
+    ESP_BLE_MESH_MODEL_OP(ESP_BLE_MESH_VND_MODEL_OP_DATA_CHUNK, DATA_CHUNK_HEADER_SIZE),
     ESP_BLE_MESH_MODEL_OP_END,
 };
 
@@ -123,9 +184,7 @@ static esp_ble_mesh_comp_t composition = {
     .elements = elements,
 };
 
-/* Dirección fija: al ser constantes de compilación, sí podemos
- * inicializarla directamente como 'static' sin ningún truco de cast
- * (a diferencia de cuando la calculábamos en tiempo de ejecución). */
+
 static esp_ble_mesh_prov_t provision = {
     .prov_uuid          = dev_uuid,
     .prov_unicast_addr  = PROV_OWN_ADDR,
@@ -224,9 +283,6 @@ static void example_ble_mesh_provisioning_cb(esp_ble_mesh_prov_cb_event_t event,
     case ESP_BLE_MESH_PROVISIONER_ADD_LOCAL_APP_KEY_COMP_EVT:
         if (param->provisioner_add_app_key_comp.err_code == 0) {
             prov_key.app_idx = param->provisioner_add_app_key_comp.app_idx;
-            /* Bind local: ahora bindeamos el modelo SERVER local
-             * (antes era el CLIENT), porque este nodo aloja el
-             * modelo que responde PONG. */
             esp_ble_mesh_provisioner_bind_app_key_to_local_model(PROV_OWN_ADDR, prov_key.app_idx,
                     ESP_BLE_MESH_VND_MODEL_ID_SERVER, CID_ESP);
         }
@@ -267,17 +323,12 @@ static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t
             example_ble_mesh_set_msg_common(&common, node, config_client.model, ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND);
             set.model_app_bind.element_addr = node->unicast_addr;
             set.model_app_bind.model_app_idx = prov_key.app_idx;
-            /* CAMBIO: bindeamos el modelo CLIENT del nodo remoto
-             * (antes era SERVER), porque ahora el nodo es quien
-             * inicia el PING. */
             set.model_app_bind.model_id = ESP_BLE_MESH_VND_MODEL_ID_CLIENT;
             set.model_app_bind.company_id = CID_ESP;
             esp_ble_mesh_config_client_set_state(&common, &set);
         } else if (param->params->opcode == ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND) {
             ESP_LOGW(TAG, "Nodo 0x%04x configurado y listo para iniciar sus pings", node->unicast_addr);
-            /* Ya NO lanzamos ninguna tarea aquí: el propio nodo
-             * arrancará su ping_test_task al recibir este mismo
-             * evento MODEL_APP_BIND, pero en su lado (config server). */
+  
         }
         break;
     default:
@@ -285,8 +336,7 @@ static void example_ble_mesh_config_client_cb(esp_ble_mesh_cfg_client_cb_event_t
     }
 }
 
-/* Ahora responde PONG a cualquier PING entrante, venga del nodo que
- * venga (misma lógica que antes tenía el servidor original). */
+
 static void example_ble_mesh_custom_model_cb(esp_ble_mesh_model_cb_event_t event,
                                              esp_ble_mesh_model_cb_param_t *param)
 {
@@ -294,14 +344,87 @@ static void example_ble_mesh_custom_model_cb(esp_ble_mesh_model_cb_event_t event
     case ESP_BLE_MESH_MODEL_OPERATION_EVT:
         if (param->model_operation.opcode == ESP_BLE_MESH_VND_MODEL_OP_PING) {
             ping_payload_t *payload = (ping_payload_t *)param->model_operation.msg;
-            ESP_LOGI(TAG, "PING #%d recibido de 0x%04x. Devolviendo PONG...",
-                     payload->seq_num, param->model_operation.ctx->addr);
+            int8_t rssi = param->model_operation.ctx->recv_rssi;
+
+            if (payload->seq_num == 1) {
+                rssi_stats_reset(&ping_rssi_stats);
+                ping_received_count = 0;
+            }
+            rssi_stats_add(&ping_rssi_stats, rssi);
+            ping_received_count++;
+
+            ESP_LOGI(TAG, "PING #%d recibido de 0x%04x (RSSI: %d dBm). Devolviendo PONG...",
+                     payload->seq_num, param->model_operation.ctx->addr, rssi);
 
             esp_err_t err = esp_ble_mesh_server_model_send_msg(&vnd_models[0],
                     param->model_operation.ctx, ESP_BLE_MESH_VND_MODEL_OP_PONG,
                     sizeof(ping_payload_t), (uint8_t *)payload);
             if (err) {
                 ESP_LOGE(TAG, "Error devolviendo PONG a 0x%04x", param->model_operation.ctx->addr);
+            }
+
+            if (payload->seq_num == payload->total_in_round) {
+                rssi_stats_log("RSSI/SNR (PING, ronda completa)", &ping_rssi_stats);
+
+                float avg = (ping_rssi_stats.count > 0) ? (float)ping_rssi_stats.sum / ping_rssi_stats.count : 0.0f;
+                float loss_pct = ((float)(payload->total_in_round - ping_received_count) / payload->total_in_round) * 100.0f;
+
+                mqtt_publish_ping_result(param->model_operation.ctx->addr,
+                        ping_received_count, payload->total_in_round, loss_pct,
+                        ping_rssi_stats.min, avg, ping_rssi_stats.max,
+                        avg - ASSUMED_NOISE_FLOOR_DBM);
+            }
+        } else if (param->model_operation.opcode == ESP_BLE_MESH_VND_MODEL_OP_DATA_CHUNK) {
+
+            data_chunk_payload_t *chunk = (data_chunk_payload_t *)param->model_operation.msg;
+            uint16_t received_len = param->model_operation.length;
+            uint16_t data_len = (received_len > DATA_CHUNK_HEADER_SIZE)
+                                 ? (uint16_t)(received_len - DATA_CHUNK_HEADER_SIZE) : 0;
+            int8_t rssi = param->model_operation.ctx->recv_rssi;
+
+            if (chunk->seq_num == 1) {
+                rssi_stats_reset(&data_rssi_stats);
+                data_chunks_received = 0;
+                data_crc_fail_count  = 0;
+                data_bytes_received  = 0;
+            }
+            rssi_stats_add(&data_rssi_stats, rssi);
+            data_chunks_received++;
+            data_bytes_received += data_len;
+
+            uint16_t computed_crc = crc16_ccitt(chunk->data, data_len);
+            uint8_t  crc_ok = (computed_crc == chunk->crc16) ? 1 : 0;
+
+            if (!crc_ok) {
+                data_crc_fail_count++;
+                ESP_LOGE(TAG, "CRC MISMATCH: Chunk #%d/%d de 0x%04x (esperado 0x%04x, calculado 0x%04x)",
+                         chunk->seq_num, chunk->total_chunks, param->model_operation.ctx->addr,
+                         chunk->crc16, computed_crc);
+            } else if (chunk->seq_num == 1 || chunk->seq_num == chunk->total_chunks || (chunk->seq_num % 50 == 0)) {
+                ESP_LOGI(TAG, "Chunk #%d/%d recibido de 0x%04x (CRC OK, RSSI: %d dBm)",
+                         chunk->seq_num, chunk->total_chunks, param->model_operation.ctx->addr, rssi);
+            }
+
+            data_ack_payload_t ack = { .seq_num = chunk->seq_num, .crc_ok = crc_ok };
+            esp_err_t err = esp_ble_mesh_server_model_send_msg(&vnd_models[0],
+                    param->model_operation.ctx, ESP_BLE_MESH_VND_MODEL_OP_DATA_ACK,
+                    sizeof(ack), (uint8_t *)&ack);
+            if (err) {
+                ESP_LOGE(TAG, "Error devolviendo DATA_ACK #%d a 0x%04x",
+                         chunk->seq_num, param->model_operation.ctx->addr);
+            }
+
+            if (chunk->seq_num == chunk->total_chunks) {
+                rssi_stats_log("RSSI/SNR (DATA_CHUNK, transferencia completa)", &data_rssi_stats);
+
+                float avg = (data_rssi_stats.count > 0) ? (float)data_rssi_stats.sum / data_rssi_stats.count : 0.0f;
+                float loss_pct = ((float)(chunk->total_chunks - data_chunks_received) / chunk->total_chunks) * 100.0f;
+
+                mqtt_publish_transfer_result(param->model_operation.ctx->addr,
+                        data_bytes_received, chunk->total_chunks, data_chunks_received,
+                        data_crc_fail_count, loss_pct,
+                        data_rssi_stats.min, avg, data_rssi_stats.max,
+                        avg - ASSUMED_NOISE_FLOOR_DBM);
             }
         }
         break;
@@ -326,10 +449,6 @@ static esp_err_t ble_mesh_init(void)
     err = esp_ble_mesh_init(&provision, &composition);
     if (err != ESP_OK) return err;
 
-    /* Ya NO llamamos a esp_ble_mesh_client_model_init() aquí: el
-     * modelo vendor local es un modelo SERVER (pasivo), no un modelo
-     * Client con seguimiento de op_pair -- eso ahora vive en cada
-     * nodo (ver su ble_mesh_init()). */
 
     err = esp_ble_mesh_provisioner_set_dev_uuid_match(match, sizeof(match), 0x0, false);
     if (err != ESP_OK) return err;
@@ -354,7 +473,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
-    
+  
     err = bluetooth_init();
     if (err != ESP_OK) return;
 
@@ -363,11 +482,14 @@ void app_main(void)
 
     ble_mesh_get_dev_uuid(dev_uuid);
     ble_mesh_init();
+
+    if (wifi_init_sta() != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi no confirmo conexion en 15s -- seguira reintentando en background");
+    }
+    mqtt_handler_start();
 }
 
-/* board.c llama a esta función desde el callback del botón físico
- * (button_tap_cb). Debe existir aunque no hagamos nada especial con
- * ella, o el enlazador falla con 'undefined reference'. */
+
 void example_ble_mesh_send_vendor_message(bool resend)
 {
     ESP_LOGI(TAG, "Botón físico presionado (modo PONG central, sin acción asociada)");

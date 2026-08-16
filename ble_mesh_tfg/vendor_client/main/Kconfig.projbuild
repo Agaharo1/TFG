@@ -1,0 +1,23 @@
+menu "TFG Mesh Configuration"
+
+    config MQTT_BROKER_URI
+        string "URI del Broker MQTT"
+        default "mqtt://192.168.1.35:1883"
+
+    config MQTT_USERNAME
+        string "MQTT Username"
+        default "WifiMeshUser"
+
+    config MQTT_PASSWORD
+        string "MQTT Password"
+        default "12345678"
+
+    config MESH_SSID
+        string "SSID de la red mesh interna"
+        default "TFG_Mesh_Network"
+
+    config MESH_PASSWORD
+        string "Contraseña de la red mesh"
+        default "mesh_pass"
+
+endmenu

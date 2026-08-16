@@ -1,16 +1,3 @@
-/* main.c - VENDOR NODE ("PINGER")
- *
- * Este nodo se deja provisionar de forma pasiva por el cliente central
- * (igual que antes: esp_ble_mesh_node_prov_enable). Lo que cambia es
- * que ahora ALOJA el modelo vendor CLIENT: en cuanto queda configurado
- * (Model App Bind confirmado), lanza su propia tarea de pings dirigida
- * SIEMPRE a la misma dirección fija: la del provisioner central.
- *
- * Flashea este mismo firmware en tantos dispositivos como "N servers"
- * quieras -- cada uno se provisiona por turnos contra el mismo cliente
- * central y, una vez configurado, empieza a hacerle ping de forma
- * independiente.
- */
 
 #include <stdio.h>
 #include <string.h>
@@ -37,45 +24,134 @@
 
 #define CID_ESP      0x02E5
 
-/* IMPORTANTE: debe coincidir EXACTAMENTE con PROV_OWN_ADDR del
- * firmware del cliente central -- es la dirección a la que este
- * nodo mandará todos sus pings. */
+
 #define TARGET_ADDR  0x0001
 
-/* IMPORTANTE: debe coincidir con APP_KEY_IDX del cliente central.
- * Al ser la primera (y única) AppKey añadida a una red nueva, el
- * stack le asigna el índice 0 -- por eso podemos asumirlo fijo aquí
- * sin tener que negociarlo dinámicamente. */
+
 #define APP_KEY_IDX  0x0000
 
 #define MSG_SEND_TTL 3
 #define MSG_TIMEOUT  0
 #define MSG_ROLE     ROLE_NODE
 
-/* Mismos nombres/valores que en el cliente central -- ver comentario
- * equivalente en ese fichero. */
-#define ESP_BLE_MESH_VND_MODEL_ID_CLIENT    0x0000   /* AQUÍ: este nodo inicia el PING */
-#define ESP_BLE_MESH_VND_MODEL_ID_SERVER    0x0001   /* En el provisioner: responde PONG */
 
-#define ESP_BLE_MESH_VND_MODEL_OP_PING      ESP_BLE_MESH_MODEL_OP_3(0x01, CID_ESP)
-#define ESP_BLE_MESH_VND_MODEL_OP_PONG      ESP_BLE_MESH_MODEL_OP_3(0x02, CID_ESP)
+#define ESP_BLE_MESH_VND_MODEL_ID_CLIENT    0x0000   
+#define ESP_BLE_MESH_VND_MODEL_ID_SERVER    0x0001   
+
+#define ESP_BLE_MESH_VND_MODEL_OP_PING       ESP_BLE_MESH_MODEL_OP_3(0x01, CID_ESP)
+#define ESP_BLE_MESH_VND_MODEL_OP_PONG       ESP_BLE_MESH_MODEL_OP_3(0x02, CID_ESP)
+
+#define ESP_BLE_MESH_VND_MODEL_OP_DATA_CHUNK ESP_BLE_MESH_MODEL_OP_3(0x03, CID_ESP)
+#define ESP_BLE_MESH_VND_MODEL_OP_DATA_ACK   ESP_BLE_MESH_MODEL_OP_3(0x04, CID_ESP)
 
 typedef struct __attribute__((packed)) {
     uint16_t seq_num;
+    uint16_t total_in_round;  
     int64_t  timestamp;
 } ping_payload_t;
 
+
+#define DATA_CHUNK_PAYLOAD_MAX  250
+
+typedef struct __attribute__((packed)) {
+    uint16_t seq_num;                       
+    uint16_t total_chunks;                  
+    uint16_t crc16;                         
+    uint8_t  data[DATA_CHUNK_PAYLOAD_MAX];  
+} data_chunk_payload_t;
+
+#define DATA_CHUNK_HEADER_SIZE  (sizeof(uint16_t) * 3)  
+
+typedef struct __attribute__((packed)) {
+    uint16_t seq_num;    
+    uint8_t  crc_ok;     
+} data_ack_payload_t;
+
+
+static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
+{
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= (uint16_t)data[i] << 8;
+        for (int b = 0; b < 8; b++) {
+            crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
 #define TOTAL_PING_MESSAGES 50
+
+
+#define DATA_TEST_SIZE_1KB    (1   * 1024)
+#define DATA_TEST_SIZE_10KB   (10  * 1024)
+#define DATA_TEST_SIZE_100KB  (100 * 1024)
+
+
+#define CONTINUOUS_PING_COUNT        5     
+#define CONTINUOUS_DATA_TEST_SIZE    DATA_TEST_SIZE_1KB  
+#define CONTINUOUS_ROUND_INTERVAL_MS 15000  
+
+
+#define ASSUMED_NOISE_FLOOR_DBM  (-95)
+
+typedef struct {
+    int32_t  sum;
+    int16_t  min;
+    int16_t  max;
+    uint16_t count;
+} rssi_stats_t;
+
+static void rssi_stats_reset(rssi_stats_t *s)
+{
+    s->sum = 0;
+    s->count = 0;
+    s->min = INT16_MAX;
+    s->max = INT16_MIN;
+}
+
+static void rssi_stats_add(rssi_stats_t *s, int8_t rssi)
+{
+    s->sum += rssi;
+    s->count++;
+    if (rssi < s->min) s->min = rssi;
+    if (rssi > s->max) s->max = rssi;
+}
+
+static float rssi_stats_avg(const rssi_stats_t *s)
+{
+    return (s->count > 0) ? ((float)s->sum / s->count) : 0.0f;
+}
+
+
+static void rssi_stats_log(const char *tag_prefix, const rssi_stats_t *s)
+{
+    if (s->count == 0) {
+        ESP_LOGW(TAG, "%s: sin muestras de RSSI", tag_prefix);
+        return;
+    }
+    float avg = rssi_stats_avg(s);
+    float snr_estimate = avg - ASSUMED_NOISE_FLOOR_DBM;
+    ESP_LOGI(TAG, "%s: RSSI min/avg/max = %d / %.1f / %d dBm (n=%d) | SNR estimado (avg): %.1f dB",
+             tag_prefix, s->min, avg, s->max, s->count, snr_estimate);
+}
 
 static uint16_t rx_count = 0;
 static uint16_t lost_count = 0;
 static int64_t  start_test_time = 0;
 static TaskHandle_t ping_task_handle = NULL;
 
-/* net_idx sí se aprende dinámicamente del evento de provisioning
- * (siempre será 0 = ESP_BLE_MESH_KEY_PRIMARY en este ejemplo, pero lo
- * leemos del evento real en vez de asumirlo, por si acaso). */
+
 static uint16_t node_net_idx = 0;
+
+
+static volatile uint16_t last_data_ack_seq = 0;
+static volatile bool     last_data_ack_ok  = false;
+static volatile int8_t   last_data_ack_rssi = 0;
+
+
+static rssi_stats_t ping_rssi_stats;
+static rssi_stats_t data_rssi_stats;
 
 static uint8_t dev_uuid[ESP_BLE_MESH_OCTET16_LEN] = { 0x32, 0x10 };
 
@@ -87,21 +163,20 @@ static esp_ble_mesh_cfg_srv_t config_server = {
 #if defined(CONFIG_BLE_MESH_GATT_PROXY_SERVER)
     .gatt_proxy = ESP_BLE_MESH_GATT_PROXY_ENABLED,
 #else
-    .gatt_proxy = ESP_BLE_MESH_GATT_PROXY_NOT_SUPPORTED,
+    
 #endif
 #if defined(CONFIG_BLE_MESH_FRIEND)
-    .friend_state = ESP_BLE_MESH_FRIEND_ENABLED,
+    
 #else
     .friend_state = ESP_BLE_MESH_FRIEND_NOT_SUPPORTED,
 #endif
     .default_ttl = 7,
 };
 
-/* NUEVO respecto al nodo original: necesitamos esp_ble_mesh_client_t +
- * op_pair, porque este nodo ahora ALOJA el modelo vendor CLIENT
- * (antes solo tenía un modelo Server pasivo y no lo necesitaba). */
+
 static const esp_ble_mesh_client_op_pair_t vnd_op_pair[] = {
-    { ESP_BLE_MESH_VND_MODEL_OP_PING, ESP_BLE_MESH_VND_MODEL_OP_PONG },
+    { ESP_BLE_MESH_VND_MODEL_OP_PING,       ESP_BLE_MESH_VND_MODEL_OP_PONG },
+    { ESP_BLE_MESH_VND_MODEL_OP_DATA_CHUNK, ESP_BLE_MESH_VND_MODEL_OP_DATA_ACK },
 };
 
 static esp_ble_mesh_client_t vendor_client = {
@@ -109,8 +184,10 @@ static esp_ble_mesh_client_t vendor_client = {
     .op_pair = vnd_op_pair,
 };
 
+
 static esp_ble_mesh_model_op_t vnd_op[] = {
     ESP_BLE_MESH_MODEL_OP(ESP_BLE_MESH_VND_MODEL_OP_PONG, sizeof(ping_payload_t)),
+    ESP_BLE_MESH_MODEL_OP(ESP_BLE_MESH_VND_MODEL_OP_DATA_ACK, sizeof(data_ack_payload_t)),
     ESP_BLE_MESH_MODEL_OP_END,
 };
 
@@ -137,13 +214,101 @@ static esp_ble_mesh_prov_t provision = {
     .uuid = dev_uuid,
 };
 
-/* Tarea de FreeRTOS con lógica Stop-and-Wait y timeout de 5s.
- * Misma lógica que antes vivía en el cliente: ahora vive aquí, en
- * cada nodo, y siempre apunta a TARGET_ADDR (el provisioner central). */
-static void ping_test_task(void *pvParameters) {
-    
-    ESP_LOGI(TAG, "=== INICIANDO TEST DE RENDIMIENTO (STOP-AND-WAIT) ===");
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+static void run_data_transfer_test(uint32_t total_bytes, const char *label)
+{
+    uint16_t total_chunks = (uint16_t)((total_bytes + DATA_CHUNK_PAYLOAD_MAX - 1) / DATA_CHUNK_PAYLOAD_MAX);
+    uint16_t chunk_lost = 0;
+    uint32_t bytes_ok = 0;
+
+    uint8_t filler[DATA_CHUNK_PAYLOAD_MAX];
+    memset(filler, 0xAA, sizeof(filler));   
+
+    esp_ble_mesh_msg_ctx_t ctx = {
+        .net_idx = node_net_idx,
+        .app_idx = APP_KEY_IDX,
+        .addr = TARGET_ADDR,
+        .send_ttl = MSG_SEND_TTL,
+    };
+
+    ESP_LOGI(TAG, "=== INICIANDO TRANSFERENCIA DE DATOS: %s (%" PRIu32 " bytes, %d chunks) ===",
+             label, total_bytes, total_chunks);
+
+    rssi_stats_reset(&data_rssi_stats);
+
+    int64_t start = esp_timer_get_time();
+
+    for (uint16_t i = 1; i <= total_chunks; i++) {
+        uint32_t remaining = total_bytes - (uint32_t)(i - 1) * DATA_CHUNK_PAYLOAD_MAX;
+        uint16_t chunk_len = (remaining > DATA_CHUNK_PAYLOAD_MAX) ? DATA_CHUNK_PAYLOAD_MAX : (uint16_t)remaining;
+
+        data_chunk_payload_t payload;
+        payload.seq_num = i;
+        payload.total_chunks = total_chunks;
+        memcpy(payload.data, filler, chunk_len);
+        payload.crc16 = crc16_ccitt(payload.data, chunk_len);
+
+
+        uint16_t msg_len = (uint16_t)(DATA_CHUNK_HEADER_SIZE + chunk_len);
+
+        ulTaskNotifyTake(pdTRUE, 0);
+
+        esp_ble_mesh_client_model_send_msg(
+            vendor_client.model, &ctx, ESP_BLE_MESH_VND_MODEL_OP_DATA_CHUNK,
+            msg_len, (uint8_t *)&payload, MSG_TIMEOUT, true, MSG_ROLE
+        );
+
+
+        TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
+        bool acked = false;
+        bool crc_ok = false;
+
+        while (xTaskGetTickCount() < deadline) {
+            TickType_t remaining = deadline - xTaskGetTickCount();
+            uint32_t notified = ulTaskNotifyTake(pdTRUE, remaining);
+            if (notified == 0) {
+                break;   
+            }
+            if (last_data_ack_seq == i) {
+                acked  = true;
+                crc_ok = last_data_ack_ok;
+      
+                rssi_stats_add(&data_rssi_stats, last_data_ack_rssi);
+                break;
+            }
+
+        }
+
+        if (!acked) {
+            chunk_lost++;
+            ESP_LOGW(TAG, "TIMEOUT: Chunk #%d/%d de %s sin ACK valido (5s)", i, total_chunks, label);
+        } else if (!crc_ok) {
+            chunk_lost++;
+            ESP_LOGE(TAG, "CRC INVALIDO: Chunk #%d/%d de %s llego corrupto segun el receptor", i, total_chunks, label);
+        } else {
+            bytes_ok += chunk_len;
+        }
+
+
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+
+    int64_t elapsed_us = esp_timer_get_time() - start;
+    float loss_pct = ((float)chunk_lost / total_chunks) * 100.0f;
+    float throughput_bps = (elapsed_us > 0) ? (bytes_ok * 8.0f) / (elapsed_us / 1000000.0f) : 0.0f;
+
+    ESP_LOGI(TAG, "=== RESULTADOS TRANSFERENCIA %s ===", label);
+    ESP_LOGI(TAG, "Chunks: %d | Perdidos: %d | Loss: %.2f %%", total_chunks, chunk_lost, loss_pct);
+    ESP_LOGI(TAG, "Bytes OK: %" PRIu32 " / %" PRIu32, bytes_ok, total_bytes);
+    ESP_LOGI(TAG, "Tiempo: %.2f s | Throughput: %.2f bps (%.2f kbps)",
+             elapsed_us / 1000000.0f, throughput_bps, throughput_bps / 1000.0f);
+    rssi_stats_log("RSSI/SNR (DATA_ACK)", &data_rssi_stats);
+}
+
+
+static void run_ping_round(uint16_t round_size)
+{
+    ESP_LOGI(TAG, "=== RONDA DE PING (%d mensajes) ===", round_size);
 
     esp_ble_mesh_msg_ctx_t ctx = {
         .net_idx = node_net_idx,
@@ -155,10 +320,12 @@ static void ping_test_task(void *pvParameters) {
     start_test_time = esp_timer_get_time();
     rx_count = 0;
     lost_count = 0;
+    rssi_stats_reset(&ping_rssi_stats);
 
-    for (uint16_t tx_count = 1; tx_count <= TOTAL_PING_MESSAGES; tx_count++) {
+    for (uint16_t tx_count = 1; tx_count <= round_size; tx_count++) {
         ping_payload_t payload = {
             .seq_num = tx_count,
+            .total_in_round = round_size,
             .timestamp = esp_timer_get_time()
         };
 
@@ -180,16 +347,34 @@ static void ping_test_task(void *pvParameters) {
     }
 
     int64_t total_time = esp_timer_get_time() - start_test_time;
-    float packet_loss = ((float)lost_count / TOTAL_PING_MESSAGES) * 100.0;
-    float throughput = (rx_count * sizeof(ping_payload_t) * 8.0) / (total_time / 1000000.0);
+    float packet_loss = ((float)lost_count / round_size) * 100.0f;
+    float throughput = (rx_count * sizeof(ping_payload_t) * 8.0f) / (total_time / 1000000.0f);
 
-    ESP_LOGI(TAG, "=== RESULTADOS FINALES ===");
-    ESP_LOGI(TAG, "Enviados: %d | Recibidos: %d | Perdidos (Timeout): %d", TOTAL_PING_MESSAGES, rx_count, lost_count);
+    ESP_LOGI(TAG, "=== RESULTADOS RONDA DE PING ===");
+    ESP_LOGI(TAG, "Enviados: %d | Recibidos: %d | Perdidos (Timeout): %d", round_size, rx_count, lost_count);
     ESP_LOGI(TAG, "Packet Loss: %.2f %%", packet_loss);
     ESP_LOGI(TAG, "Throughput Aproximado: %.2f bps", throughput);
+    rssi_stats_log("RSSI/SNR (PONG)", &ping_rssi_stats);
+}
 
-    ping_task_handle = NULL;
-    vTaskDelete(NULL);
+
+static void ping_test_task(void *pvParameters) {
+
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+    ESP_LOGI(TAG, "=== BENCHMARK INICIAL (una sola vez) ===");
+    run_ping_round(TOTAL_PING_MESSAGES);
+    run_data_transfer_test(DATA_TEST_SIZE_1KB,   "1KB");
+    run_data_transfer_test(DATA_TEST_SIZE_10KB,  "10KB");
+    run_data_transfer_test(DATA_TEST_SIZE_100KB, "100KB");
+    ESP_LOGI(TAG, "=== BENCHMARK INICIAL FINALIZADO -- entrando en modo continuo ===");
+
+
+    for (;;) {
+        run_ping_round(CONTINUOUS_PING_COUNT);
+        run_data_transfer_test(CONTINUOUS_DATA_TEST_SIZE, "1KB_continuo");
+        vTaskDelay(pdMS_TO_TICKS(CONTINUOUS_ROUND_INTERVAL_MS));
+    }
 }
 
 static void prov_complete(uint16_t net_idx, uint16_t addr, uint8_t flags, uint32_t iv_index)
@@ -223,9 +408,7 @@ static void example_ble_mesh_config_server_cb(esp_ble_mesh_cfg_server_cb_event_t
             break;
         case ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND:
             ESP_LOGI(TAG, "ESP_BLE_MESH_MODEL_OP_MODEL_APP_BIND - listo para iniciar pings");
-            /* Justo lo que vimos antes: solo lanzamos la tarea de
-             * pings DESPUÉS de que el bind se haya confirmado, nunca
-             * antes (si no, el mensaje saldría sin autorización). */
+
             if (ping_task_handle == NULL) {
                 xTaskCreate(ping_test_task, "ping_test_task", 4096, NULL, 5, &ping_task_handle);
             }
@@ -244,9 +427,21 @@ static void example_ble_mesh_custom_model_cb(esp_ble_mesh_model_cb_event_t event
         if (param->model_operation.opcode == ESP_BLE_MESH_VND_MODEL_OP_PONG) {
             int64_t time_now = esp_timer_get_time();
             ping_payload_t *recv_payload = (ping_payload_t *)param->model_operation.msg;
+            int8_t rssi = param->model_operation.ctx->recv_rssi;
             rx_count++;
+            rssi_stats_add(&ping_rssi_stats, rssi);
             float rtt_ms = (float)(time_now - recv_payload->timestamp) / 1000.0;
-            ESP_LOGI(TAG, "PONG #%d recibido. RTT: %.2f ms", recv_payload->seq_num, rtt_ms);
+            ESP_LOGI(TAG, "PONG #%d recibido. RTT: %.2f ms | RSSI: %d dBm", recv_payload->seq_num, rtt_ms, rssi);
+
+            if (ping_task_handle != NULL) {
+                xTaskNotifyGive(ping_task_handle);
+            }
+        } else if (param->model_operation.opcode == ESP_BLE_MESH_VND_MODEL_OP_DATA_ACK) {
+
+            data_ack_payload_t *ack = (data_ack_payload_t *)param->model_operation.msg;
+            last_data_ack_seq  = ack->seq_num;
+            last_data_ack_ok   = (ack->crc_ok == 1);
+            last_data_ack_rssi = param->model_operation.ctx->recv_rssi;
 
             if (ping_task_handle != NULL) {
                 xTaskNotifyGive(ping_task_handle);
@@ -269,9 +464,7 @@ static esp_err_t ble_mesh_init(void)
     err = esp_ble_mesh_init(&provision, &composition);
     if (err != ESP_OK) return err;
 
-    /* NUEVO respecto al nodo original: hace falta inicializar el
-     * modelo como Client (antes no existía esta llamada aquí, porque
-     * el nodo original solo tenía un modelo Server pasivo). */
+
     err = esp_ble_mesh_client_model_init(&vnd_models[0]);
     if (err) return err;
 
