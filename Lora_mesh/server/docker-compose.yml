@@ -1,0 +1,35 @@
+version: '3'
+services:
+ 
+  mosquitto:
+    image: eclipse-mosquitto:1.6.15
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=sensores
+    volumes:
+      - ./influx_data:/var/lib/influxdb
+
+  telegraf:
+    image: telegraf:latest
+    container_name: telegraf
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      - mosquitto
+      - influxdb
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - influxdb
